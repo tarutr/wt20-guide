@@ -1,0 +1,12 @@
+# Data files — never commit these
+data/
+*.duckdb
+
+# Mac system files
+.DS_Store
+scripts/.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

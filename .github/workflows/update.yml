@@ -1,0 +1,52 @@
+name: Update Data
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # every 6 hours
+  workflow_dispatch:         # manual trigger
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    env:
+      R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT_URL:      ${{ secrets.R2_ENDPOINT_URL }}
+      SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install duckdb supabase pandas boto3
+
+      - name: Download cricket.duckdb from R2
+        run: python scripts/download_db.py
+
+      - name: Ingest new Cricsheet data
+        run: python scripts/ingest.py
+
+      - name: Upload updated cricket.duckdb to R2
+        run: python scripts/upload_db.py
+
+      - name: Build dashboard.duckdb
+        run: python scripts/transform.py
+
+      - name: Export data.json
+        run: python scripts/export_json.py
+
+      - name: Commit and push data.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add site/data.json
+          git diff --staged --quiet || git commit -m "Auto-update data.json"
+          git push
