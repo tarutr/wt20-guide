@@ -297,11 +297,12 @@ player_by_supabase_id = {p["id"]: p for p in players_raw}
 teams_array = []
 
 for t in teams_raw:
-    team_name = t["database_name"]
-    tid       = t["id"]
+    team_name      = t["name"]           # display name, used in output
+    team_match_key = t["database_name"]  # used to match team_matches
+    tid            = t["id"]
 
     # Match record (pre-WC + WC full window)
-    tm = all_team_matches[all_team_matches["team"] == team_name]
+    tm = all_team_matches[all_team_matches["team"] == team_match_key]
     record = {
         "played":    int(len(tm)),
         "wins":      int((tm["result"] == "win").sum()),
