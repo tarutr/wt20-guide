@@ -34,7 +34,10 @@ badges_raw  = supabase.table("badges").select("*").execute().data
 # Build lookup dicts
 badge_name_to_id = {b["name"]: b["id"] for b in badges_raw}
 player_by_id     = {p["database_id"]: p for p in players_raw}
-team_by_name     = {t["name"]: t for t in teams_raw}
+team_by_name = {}
+for t in teams_raw:
+    team_by_name[t["name"]] = t
+    team_by_name[t["database_name"]] = t
 
 # ── Badge assignment calculation ─────────────────────────────────────────────
 print("Checking badge assignments...")
@@ -294,7 +297,7 @@ player_by_supabase_id = {p["id"]: p for p in players_raw}
 teams_array = []
 
 for t in teams_raw:
-    team_name = t["name"]
+    team_name = t["database_name"]
     tid       = t["id"]
 
     # Match record (pre-WC + WC full window)
