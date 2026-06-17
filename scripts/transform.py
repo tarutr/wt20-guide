@@ -501,6 +501,32 @@ bowling_percentiles AS (
     )
 ),
 
+top7_wickets_cte AS (
+    SELECT
+        d.bowler_id                                                             AS player_id,
+        COUNT(CASE WHEN w.kind IS NOT NULL THEN 1 END)                          AS top7_wickets
+    FROM deliveries d
+    JOIN matches m ON m.match_id = d.match_id
+    JOIN innings i ON i.match_id = d.match_id
+                  AND i.innings_number = d.innings_number
+    JOIN innings_batters ib ON ib.match_id = d.match_id
+                           AND ib.innings_number = d.innings_number
+                           AND ib.batter_id = d.batter_id
+                           AND ib.batting_position BETWEEN 1 AND 7
+    LEFT JOIN wickets w ON w.match_id = d.match_id
+                       AND w.innings_number = d.innings_number
+                       AND w.over_number = d.over_number
+                       AND w.ball_index = d.ball_index
+                       AND w.kind NOT IN ('run out','retired hurt','retired out',
+                           'obstructing the field','handled the ball',
+                           'hit the ball twice','timed out')
+    WHERE m.match_date_1 BETWEEN '{date_from}' AND '{date_pre_wc_to}'
+      AND m.gender = 'female'
+      AND m.match_type IN ('T20', 'IT20')
+      AND i.super_over IS NOT TRUE
+      AND d.bowler_id IN {player_ids_sql}
+    GROUP BY d.bowler_id
+),
 team_runs_rank AS (
     SELECT
         p.player_id,
@@ -558,7 +584,8 @@ SELECT
     be.wicket_edge,
     wpc.bowling_sr_percentile,
     wpc.economy_percentile,
-    wr.team_wickets_rank
+    wr.team_wickets_rank,
+    t7.top7_wickets
 FROM players p
 LEFT JOIN batting_basic bb ON bb.player_id = p.player_id
 LEFT JOIN dismissals di ON di.player_id = p.player_id
@@ -578,6 +605,7 @@ LEFT JOIN bowling_advanced bwa ON bwa.player_id = p.player_id
 LEFT JOIN bowling_edge be ON be.player_id = p.player_id
 LEFT JOIN bowling_percentiles wpc ON wpc.player_id = p.player_id
 LEFT JOIN team_wickets_rank wr ON wr.player_id = p.player_id
+LEFT JOIN top7_wickets_cte t7 ON t7.player_id = p.player_id
 """.format(
     date_from=DATE_FROM,
     date_pre_wc_to=DATE_PRE_WC_TO,
@@ -862,6 +890,32 @@ bowling_advanced AS (
     GROUP BY d.bowler_id
 ),
 
+top7_wickets_cte AS (
+    SELECT
+        d.bowler_id                                                             AS player_id,
+        COUNT(CASE WHEN w.kind IS NOT NULL THEN 1 END)                          AS top7_wickets
+    FROM deliveries d
+    JOIN matches m ON m.match_id = d.match_id
+    JOIN innings i ON i.match_id = d.match_id
+                  AND i.innings_number = d.innings_number
+    JOIN innings_batters ib ON ib.match_id = d.match_id
+                           AND ib.innings_number = d.innings_number
+                           AND ib.batter_id = d.batter_id
+                           AND ib.batting_position BETWEEN 1 AND 7
+    LEFT JOIN wickets w ON w.match_id = d.match_id
+                       AND w.innings_number = d.innings_number
+                       AND w.over_number = d.over_number
+                       AND w.ball_index = d.ball_index
+                       AND w.kind NOT IN ('run out','retired hurt','retired out',
+                           'obstructing the field','handled the ball',
+                           'hit the ball twice','timed out')
+    WHERE m.match_date_1 BETWEEN '{date_from}' AND '{date_wc_to}'
+      AND m.gender = 'female'
+      AND m.match_type IN ('T20', 'IT20')
+      AND i.super_over IS NOT TRUE
+      AND d.bowler_id IN {player_ids_sql}
+    GROUP BY d.bowler_id
+),
 bowling_edge AS (
     SELECT
         ib.bowler_id                                                            AS player_id,
@@ -913,7 +967,8 @@ SELECT
     bwa.bowling_dot_pct,
     bwa.boundary_runs_per_over,
     be.econ_edge,
-    be.wicket_edge
+    be.wicket_edge,
+    t7.top7_wickets
 FROM players p
 LEFT JOIN batting_basic bb ON bb.player_id = p.player_id
 LEFT JOIN dismissals di ON di.player_id = p.player_id
@@ -928,6 +983,7 @@ LEFT JOIN bowling_basic bw ON bw.player_id = p.player_id
 LEFT JOIN three_wkt_hauls tw ON tw.player_id = p.player_id
 LEFT JOIN bowling_advanced bwa ON bwa.player_id = p.player_id
 LEFT JOIN bowling_edge be ON be.player_id = p.player_id
+LEFT JOIN top7_wickets_cte t7 ON t7.player_id = p.player_id
 """.format(
     date_from=DATE_WC_FROM,
     date_wc_to=DATE_WC_TO,
@@ -1092,7 +1148,8 @@ important_wickets AS (
     SELECT
         d.bowler_id                                                             AS player_id,
         ROUND(COUNT(CASE WHEN d.wides IS NULL AND d.noballs IS NULL THEN 1 END) * 1.0 /
-              NULLIF(COUNT(CASE WHEN w.kind IS NOT NULL THEN 1 END), 0), 2)    AS radar_important_wickets
+              NULLIF(COUNT(CASE WHEN w.kind IS NOT NULL THEN 1 END), 0), 2)    AS top7_bowling_sr,
+        COUNT(CASE WHEN w.kind IS NOT NULL THEN 1 END)                          AS top7_wickets
     FROM deliveries d
     JOIN matches m ON m.match_id = d.match_id
     JOIN innings i ON i.match_id = d.match_id
@@ -1129,7 +1186,8 @@ SELECT
     bm.radar_dot_pct_bowl,
     be.radar_econ_edge,
     be.radar_wicket_edge,
-    iw.radar_important_wickets
+    iw.top7_bowling_sr,
+    iw.top7_wickets
 FROM players p
 LEFT JOIN batting_sr bs ON bs.player_id = p.player_id
 LEFT JOIN first_10_sr f ON f.player_id = p.player_id
