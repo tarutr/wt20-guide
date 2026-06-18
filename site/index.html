@@ -4,6 +4,27 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>T20WC Dashboard | Best of Cricket</title>
+<meta name="description" content="12 teams, 180 players, every stat — the ultimate Women's T20 World Cup fan dashboard.">
+<!-- Open Graph (WhatsApp, Facebook, iMessage, LinkedIn) -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="T20WC Dashboard | Best of Cricket">
+<meta property="og:description" content="12 teams, 180 players, every stat — the ultimate Women's T20 World Cup fan dashboard.">
+<meta property="og:image" content="https://womenst20wc.vercel.app/assets/preview_card.png">
+<meta property="og:url" content="https://womenst20wc.vercel.app/">
+<meta property="og:site_name" content="T20WC Dashboard">
+<!-- Twitter card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="T20WC Dashboard | Best of Cricket">
+<meta name="twitter:description" content="12 teams, 180 players, every stat — the ultimate Women's T20 World Cup fan dashboard.">
+<meta name="twitter:image" content="https://womenst20wc.vercel.app/assets/preview_card.png">
+<!-- Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-8FQEW9EYB4"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-8FQEW9EYB4');
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -442,7 +463,7 @@ body.ov-open #app,body.ov-open #simple{filter:blur(3px);transition:filter .2s;po
 </head>
 <body>
 <div class="topbar">
-  <div class="tb-l"><div class="tb-logo" onclick="goHome()" style="cursor:pointer" title="Back to index">WT20 <b>2026</b></div><a class="tb-sub" href="https://bestofcricket.substack.com/" target="_blank" rel="noopener">A <i>Best of Cricket</i> Dashboard</a></div>
+  <div class="tb-l"><div class="tb-logo" onclick="goHome()" style="cursor:pointer" title="Back to index">WT20 <b>2026</b></div><a class="tb-sub" href="https://bestofcricket.substack.com/" target="_blank" rel="noopener" onclick="track('substack_click')">A <i>Best of Cricket</i> Dashboard</a></div>
   <div class="tb-r">
     <div class="vtoggle"><button id="vs" onclick="setView('simple')">Simple</button><button id="vd" onclick="setView('detailed')">Detailed</button></div>
     <button class="tb-gloss" onclick="openGlossary()" title="Data glossary — stat & badge definitions">Glossary</button>
@@ -531,7 +552,7 @@ function radarData(p,mode){
 }
 function defaultRadarMode(p){return isBowler(p)?'bowling':'batting';}
 
-function setTheme(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('bd').classList.toggle('on',t==='dark');document.getElementById('bl').classList.toggle('on',t==='light');renderAll();}
+function setTheme(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('bd').classList.toggle('on',t==='dark');document.getElementById('bl').classList.toggle('on',t==='light');renderAll();track('theme_switch',{theme:t});}
 
 /* asset helpers */
 function _flagFB(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 21V4M4 4h12l-2 4 2 4H4"/></svg>`.replace(/"/g,'&quot;');}
@@ -591,7 +612,7 @@ function renderLeft(){
 }
 
 /* ---------- CENTER ---------- */
-function selectTeam(id){state.team=DATA.teams.find(t=>t.id===id);renderLeft();renderCenter();}
+function selectTeam(id){state.team=DATA.teams.find(t=>t.id===id);renderLeft();renderCenter();track('team_view',{team:state.team?state.team.name:id,mode:'detailed'});}
 // ===== Per-team palette (tuned to pop on dark default) =====
 const TEAM_COLORS={
  australia:{p:'#e0a92a',s:'#0a3d62'}, bangladesh:{p:'#1ea672',s:'#e63946'},
@@ -787,10 +808,10 @@ const RADAR_LABEL_BY_KEY={batting_sr:'Bat SR Rank',batting_average:'Average Rank
 function cmpEffBowl(){return cmpRole==='bowling';}
 function cmpStats(){const b=cmpEffBowl();return cmpView==='basic'?(b?CMP_BOWL_BASIC:CMP_BAT_BASIC):(b?CMP_BOWL_ADV:CMP_BAT_ADV);}
 function cmpAllBowlers(){return state.pins.every(id=>isBowler(DATA.players.find(p=>p.id===id)));}
-function openCompare(){if(state.pins.length<2)return;cmpRankBy=null;cmpRole=cmpAllBowlers()?'bowling':'batting';cmpSearch='';document.getElementById('cmp').classList.add('show');document.body.classList.add('ov-open');renderCompare();}
+function openCompare(){if(state.pins.length<2)return;cmpRankBy=null;cmpRole=cmpAllBowlers()?'bowling':'batting';cmpSearch='';document.getElementById('cmp').classList.add('show');document.body.classList.add('ov-open');renderCompare();track('comparison_open',{player_count:state.pins.length});}
 function closeCompare(){document.getElementById('cmp').classList.remove('show');document.body.classList.remove('ov-open');}
 function setCmpView(v){cmpView=v;renderCompare();}
-function setCmpRank(v){cmpRankBy=v;renderCompare();}
+function setCmpRank(v){cmpRankBy=v;renderCompare();track('comparison_rank_by',{metric:v});}
 function setCmpRole(v){cmpRole=v;cmpRankBy=null;renderCompare();}
 function removeFromCompare(id){togglePin(id);if(state.pins.length<2){closeCompare();}else renderCompare();}
 function cmpSearchInput(v){cmpSearch=v;fillCmpResults();}
@@ -885,7 +906,7 @@ function renderSimpleIndex(){
     <div class="s-rule"></div>
     <div class="s-grid">${cards}</div></div>`;
 }
-function goTeam(id){sState.view='team';sState.teamId=id;document.getElementById('simple').scrollTop=0;renderSimple();}
+function goTeam(id){sState.view='team';sState.teamId=id;document.getElementById('simple').scrollTop=0;renderSimple();const t=DATA.teams.find(x=>x.id===id);track('team_view',{team:t?t.name:id,mode:'simple'});}
 function goIndex(){sState.view='index';renderSimple();}
 function goHome(){if(mode==='simple'){sState.view='index';renderSimple();document.getElementById('simple').scrollTop=0;}else{const l=document.getElementById('left');if(l)l.scrollTop=0;}}
 const TEAM_BADGE_NAMES=['Serial Winners','Veterans','Peaking','Rookies','Accumulators','Chasers','Wicket-takers','In Form','Out of Form'];
@@ -920,7 +941,7 @@ function renderGlossary(){
   h+='<div class="gloss-sub">Graph Stats</div>'+GRAPH_STATS_GLOSS.map(([n,d])=>glossRow(n,d)).join('');
   document.getElementById('gloss-body').innerHTML=h;
 }
-function openGlossary(){renderGlossary();document.getElementById('glossary').style.display='block';document.body.style.overflow='hidden';document.body.classList.add('ov-open');}
+function openGlossary(){renderGlossary();document.getElementById('glossary').style.display='block';document.body.style.overflow='hidden';document.body.classList.add('ov-open');track('glossary_open');}
 function closeGlossary(){document.getElementById('glossary').style.display='none';document.body.style.overflow='';document.body.classList.remove('ov-open');}
 
 function renderSimpleTeam(){
@@ -949,11 +970,11 @@ function pmTiles(p){
   const tip=k=>STAT_INFO[k]?` data-tip="${STAT_INFO[k].replace(/"/g,'&quot;')}" style="cursor:help;border-bottom:1px dotted var(--faint)"`:'';
   return `<div class="pm-tiles">${pmStatList(p).map(c=>`<div class="pm-tile"><div class="l"><span${tip(c[0])}>${c[0]}</span></div><div class="v">${num(pmVal(p,c[1],src),c[2])}</div></div>`).join('')}</div>`;
 }
-function openPlayer(id){pm.pid=id;pm.view='basic';pm.range='pre';pm.mode=defaultRadarMode(DATA.players.find(p=>p.id===id));document.getElementById('pmodal').classList.add('show');document.body.classList.add('ov-open');renderPlayerModal();}
+function openPlayer(id){pm.pid=id;pm.view='basic';pm.range='pre';pm.mode=defaultRadarMode(DATA.players.find(p=>p.id===id));document.getElementById('pmodal').classList.add('show');document.body.classList.add('ov-open');renderPlayerModal();const pl=DATA.players.find(p=>p.id===id);track('player_view',{player:pl?pl.name:id});}
 function closePlayer(){document.getElementById('pmodal').classList.remove('show');document.body.classList.remove('ov-open');}
-function setPmView(v){pm.view=v;renderPlayerModal();}
-function setPmMode(m){pm.mode=m;renderPlayerModal();}
-function setPmRange(r){pm.range=r;renderPlayerModal();}
+function setPmView(v){pm.view=v;renderPlayerModal();track('profile_view_switch',{view:v});}
+function setPmMode(m){pm.mode=m;renderPlayerModal();track('profile_discipline_switch',{discipline:m});}
+function setPmRange(r){pm.range=r;renderPlayerModal();track('profile_range_switch',{range:r});}
 function renderPlayerModal(){
   const p=DATA.players.find(x=>x.id===pm.pid),t=teamOf(p),pal=t?teamPal(t):{p:'#E4324B'};
   const cap=captainOf(p,t);
@@ -996,7 +1017,8 @@ function renderPlayerModal(){
 
 /* ========== BOOT / RESPONSIVE ========== */
 let mode=null,resizeAttached=false,modeOverride='simple';
-function setView(v){modeOverride=v;mode=null;applyMode();}
+function track(event, params){if(window.gtag)gtag('event',event,params||{});}
+function setView(v){modeOverride=v;mode=null;applyMode();track('view_mode_switch',{mode:v});}
 function updateViewToggle(){const vd=document.getElementById('vd'),vs=document.getElementById('vs');if(vd){vd.classList.toggle('on',mode==='detailed');vs.classList.toggle('on',mode==='simple');}}
 function applyMode(){
   let m;
