@@ -262,7 +262,45 @@ if len(existing) == 0:
         print("No badge assignments calculated.")
 
 else:
-    print(f"Found {len(existing)} existing badge assignments — skipping calculation.")
+    print(f"Found {len(existing)} existing badge assignments — skipping one-time calculation.")
+
+# ── Always refresh In Form / Out of Form (these track recent results live) ────
+# Unlike the other badges (frozen after first run), the form badges recompute
+# every run from the latest results, including WC matches as they're played.
+print("Refreshing In Form / Out of Form badges...")
+try:
+    in_form_id = badge_name_to_id["In Form"]
+    out_form_id = badge_name_to_id["Out of Form"]
+
+    # Pull recent results across the FULL window (pre-WC + WC), most recent first.
+    form_matches = db.execute(f"""
+        SELECT team, result, date
+        FROM team_matches
+        WHERE date BETWEEN '{DATE_FROM}' AND '{DATE_WC_TO}'
+        ORDER BY date
+    """).df()
+
+    # Remove existing form-badge assignments so we can re-insert fresh ones.
+    supabase.table("badge_assignments").delete().eq("badge_id", in_form_id).execute()
+    supabase.table("badge_assignments").delete().eq("badge_id", out_form_id).execute()
+
+    form_assignments = []
+    for team_name in form_matches["team"].unique():
+        last_10 = form_matches[form_matches["team"] == team_name].tail(10)
+        wins = last_10[last_10["result"] == "win"].shape[0]
+        t = team_by_name.get(team_name)
+        if not t:
+            continue
+        if wins >= 7:
+            form_assignments.append({"entity_type": "team", "entity_id": t["id"], "badge_id": in_form_id})
+        elif wins < 3:
+            form_assignments.append({"entity_type": "team", "entity_id": t["id"], "badge_id": out_form_id})
+
+    if form_assignments:
+        supabase.table("badge_assignments").insert(form_assignments).execute()
+    print(f"Form badges refreshed — {len(form_assignments)} assigned.")
+except Exception as e:
+    print(f"WARNING: form badge refresh failed: {e}")
 
 
 # ── Build teams array ────────────────────────────────────────────────────────
