@@ -426,7 +426,8 @@ img{display:block}
 .tv-about{font-size:13px;line-height:1.62;color:var(--dim);white-space:pre-line}
 .tv-starcard{overflow:visible;border-top:1px solid var(--divider);padding-top:20px}
 .tv-starfig{float:right;width:200px;height:auto;shape-image-threshold:.4;shape-margin:12px;margin:-46px -16px 0 14px;position:relative;z-index:1;pointer-events:none}
-.tv-star-nm{font-size:26px;font-weight:800;line-height:1.12;margin-top:2px;overflow-wrap:break-word;max-width:calc(100% - 200px);min-width:140px}
+.tv-star-nm{font-size:26px;font-weight:800;line-height:1.08;margin-top:2px}
+.tv-star-nm .npart{display:block;white-space:nowrap}
 .tv-star-role{font-size:12px;color:var(--tp);font-weight:700;margin:10px 0 10px;text-transform:uppercase;letter-spacing:.04em}
 .tv-star-reason{font-size:12.5px;line-height:1.6;color:var(--dim)}
 .tv-seestats{margin-top:15px;display:inline-flex;align-items:center;gap:7px;background:none;border:1.5px solid var(--tp);color:var(--tp);font-family:inherit;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:8px 17px;border-radius:22px;cursor:pointer;transition:background .15s,color .15s;position:relative;z-index:2}
@@ -667,7 +668,7 @@ function teamViewHTML(t,opts){
     <div class="tv-body tv-card">
       <div class="tv-bios">
         <div class="tv-bio-about"><div class="tv-bigh serif">About ${t.name}</div><div class="tv-about">${t.team_brief.trim()}</div></div>
-        <div class="tv-starcard"><div class="tv-eyebrow">Star Player</div><img class="tv-starfig" src="${ASSETS}/star_players/${sl}.png" style="shape-outside:url(${ASSETS}/star_players/${sl}.png)" onerror="this.style.display='none'"><div class="tv-star-nm serif">${t.star_player.name}</div><div class="tv-star-role">${roleSub(sp)}</div><div class="tv-star-reason">${(t.star_player.reasoning||'').trim()}</div><button class="tv-seestats" onclick="event.stopPropagation();openPlayer('${t.star_player.id}')">See Stats<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div>
+        <div class="tv-starcard"><div class="tv-eyebrow">Star Player</div><img class="tv-starfig" src="${ASSETS}/star_players/${sl}.png" style="shape-outside:url(${ASSETS}/star_players/${sl}.png)" onerror="this.style.display='none'"><div class="tv-star-nm serif">${(()=>{const parts=t.star_player.name.trim().split(/\s+/);if(parts.length<2)return `<span class="npart">${t.star_player.name}</span>`;return `<span class="npart">${parts[0]}</span><span class="npart">${parts.slice(1).join(' ')}</span>`;})()}</div><div class="tv-star-role">${roleSub(sp)}</div><div class="tv-star-reason">${(t.star_player.reasoning||'').trim()}</div><button class="tv-seestats" onclick="event.stopPropagation();openPlayer('${t.star_player.id}')">See Stats<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div>
       </div>
       <div class="tv-squad">
         <div class="tv-eyebrow">Squad</div>
