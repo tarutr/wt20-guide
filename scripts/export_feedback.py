@@ -40,7 +40,10 @@ def fetch_feedback(supabase_url: str, service_key: str, since_iso: str):
         "Authorization": f"Bearer {service_key}",
     }
     resp = requests.get(url, params=params, headers=headers, timeout=30)
-    resp.raise_for_status()
+    if not resp.ok:
+        # Surface the actual PostgREST error so failures are diagnosable in the logs.
+        print(f"Supabase returned {resp.status_code}: {resp.text}")
+        resp.raise_for_status()
     return resp.json()
 
 
@@ -74,7 +77,8 @@ def main():
 
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=args.hours)
-    since_iso = since.isoformat()
+    # Clean, PostgREST-friendly UTC timestamp: 'YYYY-MM-DDTHH:MM:SSZ' (no microseconds, no +00:00 offset).
+    since_iso = since.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     rows = fetch_feedback(supabase_url, service_key, since_iso)
 
