@@ -1,0 +1,39 @@
+name: Feedback Digest
+
+on:
+  schedule:
+    - cron: '0 0 * * *'    # daily at 00:00 UTC
+    - cron: '0 0 * * 1'    # weekly, Mondays at 00:00 UTC
+  workflow_dispatch:        # manual trigger for testing
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+
+    env:
+      SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      GMAIL_ADDRESS:        ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD:   ${{ secrets.GMAIL_APP_PASSWORD }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      # Daily runs on every scheduled trigger AND manual dispatch.
+      # Weekly runs only on the Monday cron.
+      - name: Daily digest (last 24h)
+        if: github.event.schedule == '0 0 * * *' || github.event_name == 'workflow_dispatch'
+        run: python scripts/export_feedback.py --hours 24 --label daily
+
+      - name: Weekly digest (last 7 days)
+        if: github.event.schedule == '0 0 * * 1'
+        run: python scripts/export_feedback.py --hours 168 --label weekly
