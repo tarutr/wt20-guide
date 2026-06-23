@@ -31,7 +31,7 @@ def fetch_feedback(supabase_url: str, service_key: str, since_iso: str):
     """Fetch feedback rows created at or after since_iso, newest first."""
     url = f"{supabase_url}/rest/v1/feedback"
     params = {
-        "select": "id,created_at,comment,name,email",
+        "select": "*",
         "created_at": f"gte.{since_iso}",
         "order": "created_at.desc",
     }
