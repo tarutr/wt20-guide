@@ -66,6 +66,8 @@
     attrOrder: {}, // { batting: [attr keys...], bowling: [...] } custom ATTR order
     attrCols: {}, // { batting: Set(attr keys shown), bowling: Set(...) } e.g. 'role','country'
     minInnings: { batting: 10, bowling: 10 }, // default for pre_wc; reset on range toggle
+    adv: null, // advanced builder: { top:'AND'|'OR', groups:[{conn, conds:[{field,op,v1,v2}]}] }
+    advOpen: false, // is the advanced panel expanded?
   };
 
   // Glossary tooltips by column key (text drawn from index.html's glossary)
@@ -337,6 +339,263 @@
     return `<img class="cs-flag" src="${ASSETS}/wavy_flags/${sl}.png" onerror="this.style.visibility='hidden'">`;
   }
 
+  // =========================================================================
+  // ADVANCED FILTERS (Tier 2)
+  // Unlimited AND/OR stat conditions, grouped, plus an age filter — all using
+  // operator dropdowns (>, <, >=, <=, between). Groups join under one top
+  // connector; conditions within a group join under that group's connector.
+  // The simple Role/Type/Hand/Country filters stay as-is and are AND-ed with
+  // the advanced predicate. Incomplete conditions are ignored, so the builder
+  // never blocks results while it is being edited.
+  // =========================================================================
+  const ADV_OPS = [
+    { v: "gt", sym: ">", word: "greater than" },
+    { v: "lt", sym: "<", word: "less than" },
+    { v: "gte", sym: "≥", word: "at least" },
+    { v: "lte", sym: "≤", word: "at most" },
+    { v: "btw", sym: "between", word: "between" },
+  ];
+  const OP_SYM = { gt: ">", lt: "<", gte: "≥", lte: "≤", btw: "between" };
+
+  function newAdvCond() { return { field: "", op: "gt", v1: "", v2: "" }; }
+  function newAdvGroup() { return { conn: "AND", conds: [newAdvCond()] }; }
+  function freshAdv() { return { top: "AND", groups: [newAdvGroup()] }; }
+  function ensureAdv() { if (!cs.adv) cs.adv = freshAdv(); }
+
+  // Selectable fields = Age (discipline-independent) + the current discipline's stat columns.
+  function advFields() {
+    const stats = activeCols().map((c) => ({ key: c.key, label: c.label, dp: c.dp || 0, src: c.src || null }));
+    return [{ key: "__age", label: "Age", dp: 0, age: true }, ...stats];
+  }
+  function advFieldByKey(k) { return advFields().find((f) => f.key === k) || null; }
+  function advFieldVal(p, field) {
+    if (!field) return null;
+    if (field.age) return typeof p.age === "number" ? p.age : null;
+    let v;
+    if (field.src === "graph") v = (p.graph_data || {})[field.key];
+    else v = (statsFor(p) || {})[field.key];
+    return typeof v === "number" && !Number.isNaN(v) ? v : null;
+  }
+
+  function condComplete(c) {
+    if (!c.field) return false;
+    if (c.v1 === "" || c.v1 == null || Number.isNaN(parseFloat(c.v1))) return false;
+    if (c.op === "btw" && (c.v2 === "" || c.v2 == null || Number.isNaN(parseFloat(c.v2)))) return false;
+    return true;
+  }
+  function condEval(p, c) {
+    const val = advFieldVal(p, advFieldByKey(c.field));
+    if (val == null) return false;
+    const a = parseFloat(c.v1);
+    switch (c.op) {
+      case "gt": return val > a;
+      case "lt": return val < a;
+      case "gte": return val >= a;
+      case "lte": return val <= a;
+      case "btw": { const b = parseFloat(c.v2); return val >= Math.min(a, b) && val <= Math.max(a, b); }
+    }
+    return false;
+  }
+  function groupActiveConds(g) { return g.conds.filter(condComplete); }
+  function groupEval(p, g) {
+    const cc = groupActiveConds(g);
+    if (!cc.length) return true; // inactive group doesn't constrain
+    return g.conn === "OR" ? cc.some((c) => condEval(p, c)) : cc.every((c) => condEval(p, c));
+  }
+  function advActiveGroups() {
+    ensureAdv();
+    return cs.adv.groups.filter((g) => groupActiveConds(g).length > 0);
+  }
+  function playerMatchesAdvanced(p) {
+    const ag = advActiveGroups();
+    if (!ag.length) return true;
+    return cs.adv.top === "OR" ? ag.some((g) => groupEval(p, g)) : ag.every((g) => groupEval(p, g));
+  }
+  function advCount() {
+    return advActiveGroups().reduce((n, g) => n + groupActiveConds(g).length, 0);
+  }
+
+  // Plain-English clause, e.g. "Bat SR > 130 AND (Avg > 30 OR 50+ ≥ 10)"
+  function plainNum(n) {
+    if (!isFinite(n)) return "" + n;
+    return Number.isInteger(n) ? "" + n : "" + n;
+  }
+  function condPhrase(c) {
+    const f = advFieldByKey(c.field);
+    const lab = f ? f.label : c.field;
+    if (c.op === "btw") {
+      const a = parseFloat(c.v1), b = parseFloat(c.v2);
+      return `${lab} between ${plainNum(Math.min(a, b))} and ${plainNum(Math.max(a, b))}`;
+    }
+    return `${lab} ${OP_SYM[c.op]} ${plainNum(parseFloat(c.v1))}`;
+  }
+  function advClause() {
+    const ag = advActiveGroups();
+    if (!ag.length) return "";
+    const multi = ag.length > 1;
+    const parts = ag.map((g) => {
+      const cc = groupActiveConds(g);
+      const joiner = g.conn === "OR" ? " OR " : " AND ";
+      const inner = cc.map(condPhrase).join(joiner);
+      return multi && cc.length > 1 ? `(${inner})` : inner;
+    });
+    return parts.join(cs.adv.top === "OR" ? " OR " : " AND ");
+  }
+
+  // ---- Advanced popup: open/close + indicators ---------------------------
+  function updateAdvToggle() {
+    const n = advCount();
+    const btn = document.getElementById("cs-advtoggle");
+    if (btn) {
+      btn.classList.toggle("on", n > 0);
+      const badge = btn.querySelector(".cs-advcount");
+      badge.style.display = n > 0 ? "inline-flex" : "none";
+      badge.textContent = n;
+    }
+    const fc = document.getElementById("cs-advfootcount");
+    if (fc) fc.textContent = n === 0 ? "No conditions yet" : (n === 1 ? "1 condition active" : n + " conditions active");
+  }
+  function openAdvPopup() {
+    ensureAdv();
+    renderAdvPanel();
+    const back = document.getElementById("cs-advback");
+    if (back) back.classList.add("show");
+    cs.advOpen = true;
+  }
+  function closeAdvPopup() {
+    const back = document.getElementById("cs-advback");
+    if (back) back.classList.remove("show");
+    cs.advOpen = false;
+  }
+
+  function fieldSelectHTML(c) {
+    const fields = advFields();
+    const stats = fields.filter((f) => !f.age);
+    const discLabel = cs.discipline === "batting" ? "Batting stats" : "Bowling stats";
+    const opt = (f) => `<option value="${f.key}" ${c.field === f.key ? "selected" : ""}>${f.label}</option>`;
+    return `<select class="cs-csel cs-csel-field" data-role="field">
+        <option value="" ${!c.field ? "selected" : ""}>Stat…</option>
+        <optgroup label="Player">${opt({ key: "__age", label: "Age" })}</optgroup>
+        <optgroup label="${discLabel}">${stats.map(opt).join("")}</optgroup>
+      </select>`;
+  }
+  function opSelectHTML(c) {
+    return `<select class="cs-csel cs-csel-op" data-role="op">
+      ${ADV_OPS.map((o) => `<option value="${o.v}" ${c.op === o.v ? "selected" : ""}>${o.word}</option>`).join("")}
+    </select>`;
+  }
+  function valInputsHTML(c) {
+    if (c.op === "btw") {
+      return `<input class="cs-cval" data-role="v1" type="number" inputmode="decimal" value="${c.v1}" placeholder="min">
+              <span class="cs-cand">and</span>
+              <input class="cs-cval" data-role="v2" type="number" inputmode="decimal" value="${c.v2}" placeholder="max">`;
+    }
+    return `<input class="cs-cval" data-role="v1" type="number" inputmode="decimal" value="${c.v1}" placeholder="value">`;
+  }
+
+  function renderAdvPanel() {
+    const panel = document.getElementById("cs-advpanel");
+    if (!panel) return;
+    ensureAdv();
+    const groups = cs.adv.groups;
+    let html = "";
+    groups.forEach((g, gi) => {
+      if (gi > 0) {
+        html += `<div class="cs-grpconn"><span class="cs-conn-pill" data-role="top">${cs.adv.top}</span></div>`;
+      }
+      html += `<div class="cs-grp" data-gi="${gi}">
+        <div class="cs-grphead">
+          <span class="gl">Match</span>
+          <span class="cs-anytoggle" data-role="conn">
+            <button data-conn="AND" class="${g.conn === "AND" ? "on" : ""}">All</button>
+            <button data-conn="OR" class="${g.conn === "OR" ? "on" : ""}">Any</button>
+          </span>
+          <span class="gl">of:</span>
+          ${groups.length > 1 ? `<button class="cs-grp-x" data-role="rmgrp" title="Remove group">&#10005;</button>` : ""}
+        </div>
+        ${g.conds.map((c, ci) => `
+          <div class="cs-cond" data-ci="${ci}">
+            ${fieldSelectHTML(c)}
+            ${opSelectHTML(c)}
+            ${valInputsHTML(c)}
+            <button class="cs-cond-x" data-role="rmcond" title="Remove condition">&#10005;</button>
+          </div>`).join("")}
+        <button class="cs-addbtn" data-role="addcond">+ Add condition</button>
+      </div>`;
+    });
+    html += `<button class="cs-addbtn cs-addgrp" data-role="addgrp">+ Add group (OR / AND another set)</button>`;
+    panel.innerHTML = html;
+    wireAdvPanel();
+    updateAdvToggle();
+  }
+
+  function wireAdvPanel() {
+    const panel = document.getElementById("cs-advpanel");
+    if (!panel) return;
+    ensureAdv();
+    // top connector toggles AND <-> OR
+    panel.querySelectorAll('[data-role="top"]').forEach((el) => {
+      el.addEventListener("click", () => {
+        cs.adv.top = cs.adv.top === "AND" ? "OR" : "AND";
+        renderAdvPanel();
+      });
+    });
+    // add group
+    const ag = panel.querySelector('[data-role="addgrp"]');
+    if (ag) ag.addEventListener("click", () => { cs.adv.groups.push(newAdvGroup()); renderAdvPanel(); });
+    panel.querySelectorAll(".cs-grp").forEach((grpEl) => {
+      const gi = +grpEl.dataset.gi;
+      const g = cs.adv.groups[gi];
+      if (!g) return;
+      // group conn (All/Any)
+      grpEl.querySelectorAll('[data-role="conn"] button').forEach((b) => {
+        b.addEventListener("click", () => { g.conn = b.dataset.conn; renderAdvPanel(); });
+      });
+      // remove group
+      const rg = grpEl.querySelector('[data-role="rmgrp"]');
+      if (rg) rg.addEventListener("click", () => {
+        cs.adv.groups.splice(gi, 1);
+        if (!cs.adv.groups.length) cs.adv.groups.push(newAdvGroup());
+        renderAdvPanel();
+      });
+      // add condition
+      grpEl.querySelector('[data-role="addcond"]').addEventListener("click", () => {
+        g.conds.push(newAdvCond()); renderAdvPanel();
+      });
+      // per-condition controls
+      grpEl.querySelectorAll(".cs-cond").forEach((condEl) => {
+        const ci = +condEl.dataset.ci;
+        const c = g.conds[ci];
+        if (!c) return;
+        condEl.querySelector('[data-role="field"]').addEventListener("change", (e) => {
+          c.field = e.target.value; renderAdvPanel();
+        });
+        condEl.querySelector('[data-role="op"]').addEventListener("change", (e) => {
+          const was = c.op; c.op = e.target.value;
+          // re-render only when crossing the between boundary (changes input count)
+          if ((was === "btw") !== (c.op === "btw")) renderAdvPanel();
+        });
+        // value inputs update state live WITHOUT re-render (preserve typing focus)
+        condEl.querySelectorAll('[data-role="v1"],[data-role="v2"]').forEach((inp) => {
+          inp.addEventListener("input", (e) => {
+            c[e.target.dataset.role] = e.target.value;
+            updateAdvToggle();
+          });
+        });
+        const rc = condEl.querySelector('[data-role="rmcond"]');
+        if (rc) rc.addEventListener("click", () => {
+          g.conds.splice(ci, 1);
+          if (!g.conds.length) {
+            // removing the last condition: keep an empty group, or drop it if others exist
+            if (cs.adv.groups.length > 1) cs.adv.groups.splice(gi, 1);
+            else g.conds.push(newAdvCond());
+          }
+          renderAdvPanel();
+        });
+      });
+    });
+  }
+
   // ---- Build the modal once ----------------------------------------------
   function buildModal() {
     if (document.getElementById("cs-backdrop")) return;
@@ -383,6 +642,10 @@
               <div class="cs-fdrop" id="cs-f-hand"><span class="cs-fl">Bat Hand</span> <span class="cs-fv">All</span> <span class="cs-ca">&#9660;</span></div>
               <div class="cs-fdrop" id="cs-f-country"><span class="cs-fl">Country</span> <span class="cs-fv">All</span> <span class="cs-ca">&#9660;</span></div>
             </div>
+            <button class="cs-advtoggle" id="cs-advtoggle" title="Advanced filters">
+              <span>Advanced filters</span>
+              <span class="cs-advcount" style="display:none">0</span>
+            </button>
             <div class="cs-spacer"></div>
             <button class="cs-clear" onclick="csResetTable()">Clear</button>
             <button class="cs-run" id="cs-run">Search</button>
@@ -409,6 +672,25 @@
             <div class="cs-foot-btn" id="cs-mininnbtn"><span id="cs-mininn-val">10</span> <span class="cs-ca">&#9660;</span></div>
           </div>
         </div>
+
+        <div class="cs-advback" id="cs-advback">
+          <div class="cs-advmodal" role="dialog" aria-label="Advanced filters">
+            <div class="cs-advmodal-head">
+              <div>
+                <div class="cs-advmodal-title">Advanced filters</div>
+                <div class="cs-advmodal-sub">Filter by any stat or by age. Add conditions, choose Match all (AND) or Match any (OR) within a group, and combine groups. Press Search to apply.</div>
+              </div>
+              <button class="cs-x" id="cs-advclose" aria-label="Close">&#10005;</button>
+            </div>
+            <div class="cs-advmodal-body"><div id="cs-advpanel"></div></div>
+            <div class="cs-advmodal-foot">
+              <span class="cs-advfootcount" id="cs-advfootcount">No conditions yet</span>
+              <div class="cs-spacer"></div>
+              <button class="cs-clear" id="cs-advclear">Clear</button>
+              <button class="cs-run" id="cs-advsearch">Search</button>
+            </div>
+          </div>
+        </div>
       </div>`;
     document.body.appendChild(wrap);
 
@@ -418,9 +700,11 @@
       setSeg("cs-discipline", b); cs.discipline = b.dataset.v;
       cs.filters.type = ""; cs.filters.hand = "";
       cs.sortKey = null;
+      cs.adv = freshAdv(); // advanced stat fields are discipline-specific
       ensureColState();
       updateFilterLabels();
       updateMinInningsDefault();
+      renderAdvPanel();
       renderTable();
     });
     // range toggle
@@ -442,6 +726,14 @@
     // run button + randomise
     wrap.querySelector("#cs-run").addEventListener("click", runFilters);
     wrap.querySelector("#cs-rand").addEventListener("click", randomise);
+    // advanced filters popup
+    wrap.querySelector("#cs-advtoggle").addEventListener("click", openAdvPopup);
+    wrap.querySelector("#cs-advclose").addEventListener("click", closeAdvPopup);
+    wrap.querySelector("#cs-advsearch").addEventListener("click", () => { runFilters(); closeAdvPopup(); });
+    wrap.querySelector("#cs-advclear").addEventListener("click", () => { cs.adv = freshAdv(); renderAdvPanel(); });
+    wrap.querySelector("#cs-advback").addEventListener("click", (e) => { if (e.target.id === "cs-advback") closeAdvPopup(); });
+    ensureAdv();
+    renderAdvPanel();
     // row chevrons (collapse each row independently)
     wrap.querySelector("#cs-chev-search").addEventListener("click", () => toggleRow("search"));
     wrap.querySelector("#cs-chev-filter").addEventListener("click", () => toggleRow("filter"));
@@ -551,11 +843,12 @@
     return true;
   }
   function runFilters() {
-    cs.rows = DATA.players.filter(playerMatchesFilters);
+    cs.rows = DATA.players.filter((p) => playerMatchesFilters(p) && playerMatchesAdvanced(p));
     renderTable();
     if (window.track) track("compare_stats_run_filters", {
       role: cs.filters.role || "all", type: cs.filters.type || "all",
       hand: cs.filters.hand || "all", country: cs.filters.country || "all",
+      adv_conditions: advCount(),
       count: cs.rows.length,
     });
   }
@@ -616,10 +909,52 @@
     }
     cs.filters = best;
     updateFilterLabels();
+    cs.adv = freshAdv();         // clear any prior random advanced condition
+    maybeRandomAdvanced(best);   // ~45% of the time, also throw an advanced/age condition
+    renderAdvPanel();
     runFilters();
-    if (window.track) track("compare_stats_randomise");
+    if (window.track) track("compare_stats_randomise", { adv_conditions: advCount() });
   }
   window.csRandomise = randomise;
+
+  // Sometimes layer one advanced (stat or age) condition on top of the random
+  // simple filters. The threshold is derived from the candidate set so the
+  // combined result still clears the >=5 floor (we keep >=5 survivors).
+  function roundTo(n, dp) { const f = Math.pow(10, dp); return Math.round(n * f) / f; }
+  function maybeRandomAdvanced(simpleFilters) {
+    if (Math.random() > 0.45) return;
+    const minInn = cs.minInnings[cs.discipline] || 0;
+    const ik = inningsKey();
+    const cands = DATA.players.filter((p) => {
+      if (!matchesTrial(p, simpleFilters)) return false;
+      const v = (statsFor(p) || {})[ik];
+      return typeof v === "number" ? v >= minInn : minInn === 0;
+    });
+    if (cands.length < 9) return; // not enough headroom to narrow further
+    const useAge = Math.random() < 0.25;
+    let field;
+    if (useAge) field = { key: "__age", age: true, dp: 0, label: "Age" };
+    else {
+      const col = activeCols()[Math.floor(Math.random() * activeCols().length)];
+      field = { key: col.key, dp: col.dp || 0, src: col.src || null, label: col.label };
+    }
+    const vals = cands.map((p) => advFieldVal(p, field)).filter((v) => typeof v === "number").sort((a, b) => a - b);
+    if (vals.length < 7) return;
+    const gt = Math.random() < 0.5;
+    const keepFrac = 0.4 + Math.random() * 0.3; // keep ~40-70%
+    let thr;
+    if (gt) { const idx = Math.floor((1 - keepFrac) * vals.length); thr = vals[Math.min(Math.max(idx, 0), vals.length - 2)]; }
+    else { const idx = Math.ceil(keepFrac * vals.length); thr = vals[Math.min(Math.max(idx, 1), vals.length - 1)]; }
+    thr = roundTo(thr, field.dp || 0);
+    const op = gt ? "gt" : "lt";
+    const survivors = cands.filter((p) => {
+      const v = advFieldVal(p, field);
+      if (typeof v !== "number") return false;
+      return gt ? v > thr : v < thr;
+    }).length;
+    if (survivors < 5) return; // keep the >=5 floor
+    cs.adv = { top: "AND", groups: [{ conn: "AND", conds: [{ field: field.key, op, v1: String(thr), v2: "" }] }] };
+  }
   function matchesTrial(p, trial) {
     if (trial.role && !roleMatch(p, trial.role)) return false;
     if (trial.type) {
@@ -724,6 +1059,8 @@
     cs.attrCols[d] = new Set();
     cs.attrOrder[d] = ATTR_COLS.map((a) => a.key);
     cs.sortKey = null; cs.sortDir = "desc";
+    cs.adv = freshAdv();
+    renderAdvPanel();
     renderTable();
   };
 
@@ -744,9 +1081,13 @@
     // If no role/type/hand, default subject is "players"
     let subject = subjects.length ? subjects.join(", ") : "players";
     if (f.country) subject += " from " + f.country;
-    if (!subjects.length && !f.country) return "";
+    const hasSimple = subjects.length || f.country;
+    const adv = advClause();
+    if (!hasSimple && !adv) return "";
     const disc = cs.discipline === "batting" ? "Batting" : "Bowling";
-    return `${disc} stats for ${subject}.`;
+    let s = `${disc} stats for ${subject}`;
+    if (adv) s += ` where ${adv}`;
+    return s + ".";
   }
 
   function renderTable() {
