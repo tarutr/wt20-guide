@@ -405,6 +405,102 @@ img{display:block}
 .fb-fab{background:var(--panel);border:1px solid var(--border);color:var(--dim);font-family:inherit;font-size:13px;font-weight:600;padding:10px 22px;border-radius:22px;cursor:pointer}
 .fb-fab:hover{color:var(--accent);border-color:var(--accent)}
 @media(max-width:1299px){.tb-fb{display:none}}
+/* ===== Compare Stats ===== */
+@media(max-width:1299px){.tb-cs{display:none}}
+.cs-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:215;display:none;align-items:center;justify-content:center;padding:24px}
+.cs-backdrop.show{display:flex}
+.cs-modal{width:min(1180px,96vw);height:min(680px,92vh);background:var(--panel);border:1px solid var(--border);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.cs-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border);flex:none}
+.cs-title{font-size:22px;font-weight:800;color:var(--text)}
+.cs-sub{font-size:12px;color:var(--dim);margin-top:2px}
+.cs-x{width:30px;height:30px;border-radius:50%;background:var(--chip);border:1px solid var(--border);color:var(--dim);font-size:13px;cursor:pointer}
+.cs-toolbar{padding:14px 22px;border-bottom:1px solid var(--border);flex:none}
+.cs-toolrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.cs-seg{display:inline-flex;background:var(--chip);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.cs-seg button{background:none;border:none;color:var(--dim);font-family:inherit;font-size:12px;font-weight:700;padding:7px 14px;cursor:pointer}
+.cs-seg button.on{background:var(--accent);color:#fff}
+.cs-search{position:relative;min-width:240px;flex:1;max-width:340px}
+.cs-search input{width:100%;box-sizing:border-box;background:var(--chip);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:13px;padding:8px 13px;outline:none}
+.cs-search input:focus{border-color:var(--accent)}
+.cs-results{position:absolute;top:calc(100% + 5px);left:0;right:0;background:var(--panel2,#0F1118);border:1px solid var(--border);border-radius:10px;overflow:hidden;z-index:5;display:none;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.cs-res{display:flex;align-items:center;gap:9px;padding:8px 12px;cursor:pointer}
+.cs-res:hover{background:var(--soft,rgba(255,255,255,.05))}
+.cs-res-face{width:28px;height:28px;border-radius:50%;object-fit:cover;flex:none}
+.cs-res-nm{font-size:13px;font-weight:700}
+.cs-res-meta{font-size:11px;color:var(--faint);margin-left:auto}
+.cs-flag{width:20px;height:14px;border-radius:3px;object-fit:cover;flex:none}
+.cs-spacer{flex:1}
+.cs-clear{background:none;border:1px solid var(--border);color:var(--dim);font-family:inherit;font-size:12px;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer}
+.cs-clear:hover{color:var(--accent);border-color:var(--accent)}
+.cs-twrap{flex:1;overflow:auto;position:relative}
+.cs-table{border-collapse:separate;border-spacing:0;width:100%}
+.cs-table th,.cs-table td{white-space:nowrap;text-align:center;padding:0 16px;height:46px;font-size:13px;border-right:1px solid var(--soft,rgba(255,255,255,.05))}
+.cs-table th:last-child,.cs-table td:last-child{border-right:none}
+.cs-table thead th{position:sticky;top:0;background:var(--panel2,#0F1118);color:var(--faint);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border);z-index:2;user-select:none}
+.cs-table .cs-grouprow th{top:0;height:32px;font-size:10px;letter-spacing:.1em;color:var(--accent);border-bottom:1px solid var(--border);background:var(--panel2,#0F1118)}
+.cs-table .cs-grouprow th.cs-group{border-left:1px solid var(--border)}
+.cs-table .cs-grouprow th.cs-group-adv{color:var(--dim)}
+.cs-table thead tr:nth-child(2) th{top:32px}
+.cs-table .cs-col-player{position:sticky;left:0;text-align:left;background:var(--panel);z-index:3;min-width:248px;border-right:1px solid var(--border)}
+.cs-table thead .cs-col-player{z-index:4}
+.cs-pl{display:flex;align-items:center;gap:10px}
+.cs-face{width:34px;height:34px;border-radius:50%;object-fit:cover;border:1.5px solid var(--border);flex:none}
+.cs-nm{font-size:13px;font-weight:700}
+.cs-pl-sp{flex:1}
+.cs-rm{background:none;border:none;color:var(--faint);font-size:13px;cursor:pointer;padding:4px;border-radius:5px;flex:none}
+.cs-rm:hover{color:var(--accent);background:var(--soft,rgba(255,255,255,.05))}
+.cs-table tbody td{color:var(--text);font-weight:600;border-bottom:1px solid var(--soft,rgba(255,255,255,.05))}
+.cs-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center}
+.cs-empty-h{font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px}
+.cs-empty-p{font-size:13px;color:var(--dim)}
+/* Stage B+: filter row, chevrons, sentence */
+.cs-chev{background:none;border:none;color:var(--faint);font-size:11px;cursor:pointer;padding:4px 6px;flex:none}
+.cs-chev:hover{color:var(--accent)}
+.cs-head-r{display:flex;align-items:center;gap:10px}
+.cs-rand{background:var(--chip);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;font-weight:600;padding:7px 14px;border-radius:8px;cursor:pointer}
+.cs-rand:hover{border-color:var(--accent);color:var(--accent)}
+.cs-toolrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cs-toolrow.collapsed{flex-wrap:nowrap;min-height:0}
+.cs-searchrow.collapsed > *:not(.cs-chev):not(.cs-collabel),.cs-filterrow.collapsed > *:not(.cs-chev):not(.cs-collabel){display:none}
+.cs-collabel{display:none;font-size:11px;font-weight:600;color:var(--faint);letter-spacing:.04em}
+.cs-toolrow.collapsed .cs-collabel{display:inline}
+.cs-filterrow{margin-top:12px}
+.cs-filtergroup{display:flex;align-items:center;gap:10px;padding:0 14px;border-left:2px solid var(--border);border-right:2px solid var(--border)}
+.cs-filter-tag{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.cs-fdrop{background:var(--chip);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;font-weight:600;padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;position:relative;user-select:none}
+.cs-fdrop:hover{border-color:var(--faint)}
+.cs-fdrop.active{border-color:var(--accent)}
+.cs-fdrop .cs-fl{color:var(--faint);font-weight:500}
+.cs-fdrop .cs-ca{color:var(--faint);font-size:9px}
+.cs-fmenu{position:absolute;top:calc(100% + 5px);left:0;background:var(--panel2,#0F1118);border:1px solid var(--border);border-radius:9px;overflow:hidden;z-index:6;min-width:150px;box-shadow:0 16px 40px rgba(0,0,0,.5);max-height:260px;overflow-y:auto}
+.cs-fmenu-it{padding:8px 13px;font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;white-space:nowrap}
+.cs-fmenu-it:hover{background:var(--soft,rgba(255,255,255,.05));color:var(--text)}
+.cs-fmenu-it.on{color:var(--accent)}
+.cs-rand:hover{border-color:var(--accent);color:var(--accent)}
+.cs-run{background:var(--accent);color:#fff;border:none;font-family:inherit;font-size:12px;font-weight:700;padding:8px 18px;border-radius:8px;cursor:pointer}
+.cs-sentence{padding:12px 22px 0;font-size:12.5px;font-style:italic;color:var(--dim)}
+/* Stage C: footer, menus, sort/drag */
+.cs-foot{flex:none;display:flex;align-items:center;gap:12px;padding:13px 22px;border-top:1px solid var(--border)}
+.cs-foot-btn{background:var(--chip);border:1px solid var(--border);color:var(--dim);font-size:12px;font-weight:600;padding:8px 14px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:7px;position:relative;user-select:none}
+.cs-foot-btn:hover{border-color:var(--faint);color:var(--text)}
+.cs-foot-mininn{display:flex;align-items:center;gap:8px;margin-left:auto}
+.cs-mininn-lab{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+.cs-popmenu{position:absolute;bottom:calc(100% + 6px);left:0;background:var(--panel2,#0F1118);border:1px solid var(--border);border-radius:10px;z-index:8;box-shadow:0 16px 40px rgba(0,0,0,.5);min-width:170px;max-height:300px;overflow-y:auto;padding:6px}
+.cs-colmenu{min-width:320px}
+.cs-colmenu-h{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:8px 8px 6px}
+.cs-colgrid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.cs-colit{display:flex;align-items:center;gap:8px;padding:7px 9px;font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;border-radius:6px}
+.cs-colit:hover{background:var(--soft,rgba(255,255,255,.05))}
+.cs-box{width:15px;height:15px;border-radius:4px;border:1.5px solid var(--faint);flex:none;display:flex;align-items:center;justify-content:center}
+.cs-colit.on{color:var(--text)}
+.cs-colit.on .cs-box{background:var(--accent);border-color:var(--accent)}
+.cs-colit.on .cs-box::after{content:"\2713";color:#fff;font-size:10px;font-weight:800}
+.cs-sortind{color:var(--accent);font-size:9px;margin-left:3px}
+.cs-sortable{cursor:pointer}
+.cs-sortable:hover{color:var(--text)}
+.cs-draggable[draggable="true"]{cursor:grab}
+.cs-dragover{background:rgba(228,50,75,.15) !important;box-shadow:inset 2px 0 0 var(--accent)}
+.cs-grouprow .cs-group-attr{border-left:none}
 /* ===== Redesigned team view (shared by detailed + simplified) ===== */
 .tv{--tp:#E4324B;--ts:#15233f}
 .tv-head{position:relative;display:flex;gap:18px;align-items:stretch;padding:20px 24px;border-radius:16px;overflow:hidden;background:var(--panel);border:1px solid var(--border);margin-bottom:16px;min-height:300px}
@@ -491,9 +587,10 @@ body.ov-open #app,body.ov-open #simple{filter:blur(3px);transition:filter .2s;po
 <div class="topbar">
   <div class="tb-l"><div class="tb-logo" onclick="goHome()" style="cursor:pointer" title="Back to index">WT20 <b>2026</b></div><a class="tb-sub" href="https://bestofcricket.substack.com/" target="_blank" rel="noopener" onclick="track('substack_click')">A <i>Best of Cricket</i> Dashboard</a></div>
   <div class="tb-r">
-    <div class="vtoggle"><button id="vs" onclick="setView('simple')">Simple</button><button id="vd" onclick="setView('detailed')">Detailed</button></div>
+    <button class="tb-gloss tb-cs" onclick="openCompareStats()">Compare Stats</button>
     <button class="tb-gloss" onclick="openGlossary()" title="Data glossary — stat & badge definitions">Glossary</button>
     <button class="tb-gloss tb-fb" onclick="openFeedback()">Share Feedback</button>
+    <div class="vtoggle"><button id="vs" onclick="setView('simple')">Simple</button><button id="vd" onclick="setView('detailed')">Detailed</button></div>
   <div class="toggle">
     <button id="bl" onclick="setTheme('light')" title="Light mode" aria-label="Light mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
     <button id="bd" class="on" onclick="setTheme('dark')" title="Dark mode" aria-label="Dark mode"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg></button>
@@ -1132,5 +1229,6 @@ async function init(){
 }
 init();
 </script>
+<script src="compare-stats.js"></script>
 </body>
 </html>
