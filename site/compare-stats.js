@@ -176,12 +176,14 @@
     const mx = maxInnings();
     const opts = [];
     if (cs.range === "wc") {
-      for (let i = 0; i <= mx; i++) opts.push(i);
+      // 1-game steps, starting at 1 (0 would let every player through)
+      for (let i = 1; i <= Math.max(mx, 1); i++) opts.push(i);
     } else {
-      for (let i = 0; i <= mx; i += 5) opts.push(i);
-      if (opts[opts.length - 1] !== mx && mx > 0) {} // keep clean 5-steps
+      // start at 1, then clean 5-game steps: 1, 5, 10, 15, …
+      opts.push(1);
+      for (let i = 5; i <= mx; i += 5) opts.push(i);
     }
-    return opts.length ? opts : [0];
+    return opts.length ? opts : [1];
   }
   function openMinInnMenu() {
     closeAnyMenu();
@@ -596,7 +598,15 @@
         trial[dim] = pick(opts).v;
       }
       if (!ok) continue;
-      const count = DATA.players.filter((p) => matchesTrial(p, trial)).length;
+      // Count players who match the trial AND meet the current Min Innings threshold,
+      // so the >=5 floor holds after the table's innings filter is applied.
+      const minInn = cs.minInnings[cs.discipline] || 0;
+      const ik = inningsKey();
+      const count = DATA.players.filter((p) => {
+        if (!matchesTrial(p, trial)) return false;
+        const v = (statsFor(p) || {})[ik];
+        return typeof v === "number" ? v >= minInn : minInn === 0;
+      }).length;
       if (count >= MIN && count <= 60) { best = trial; break; }
       if (count >= MIN && !best) best = trial; // fallback: any combo with >=5 and >=2 filters
     }
@@ -661,9 +671,42 @@
   // ---- Add / remove rows --------------------------------------------------
   function addPlayer(p) {
     if (cs.rows.some((x) => x.id === p.id)) return;
+    // Enforce the current Min Innings threshold even for searched players,
+    // so the table stays internally consistent. If the player falls short,
+    // explain why instead of silently dropping them.
+    const minInn = cs.minInnings[cs.discipline] || 1;
+    const ik = inningsKey();
+    const inn = (statsFor(p) || {})[ik];
+    const innVal = typeof inn === "number" ? inn : 0;
+    if (innVal < minInn) {
+      const disc = cs.discipline === "batting" ? "batting" : "bowling";
+      csToast(`${p.name} has fewer than ${minInn} ${disc} innings and doesn't meet your Min Innings filter.`);
+      return;
+    }
     cs.rows.unshift(p); // add to the top
     renderTable();
     if (window.track) track("compare_stats_add_player", { player: p.name });
+  }
+
+  // Small auto-dismissing toast inside the modal.
+  function csToast(msg) {
+    const modal = document.querySelector(".cs-modal");
+    if (!modal) return;
+    let t = document.getElementById("cs-toast");
+    if (t) t.remove();
+    t = document.createElement("div");
+    t.id = "cs-toast";
+    t.className = "cs-toast";
+    t.textContent = msg;
+    modal.appendChild(t);
+    // force reflow then show (for transition)
+    void t.offsetWidth;
+    t.classList.add("show");
+    clearTimeout(csToast._timer);
+    csToast._timer = setTimeout(() => {
+      t.classList.remove("show");
+      setTimeout(() => { if (t && t.parentNode) t.remove(); }, 300);
+    }, 4200);
   }
   window.csRemovePlayer = function (id) {
     cs.rows = cs.rows.filter((p) => p.id !== id);

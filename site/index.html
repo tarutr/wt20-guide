@@ -501,6 +501,8 @@ img{display:block}
 .cs-draggable[draggable="true"]{cursor:grab}
 .cs-dragover{background:rgba(228,50,75,.15) !important;box-shadow:inset 2px 0 0 var(--accent)}
 .cs-grouprow .cs-group-attr{border-left:none}
+.cs-toast{position:absolute;left:50%;bottom:74px;transform:translateX(-50%) translateY(8px);background:var(--accent);color:#fff;font-size:13px;font-weight:600;padding:11px 18px;border-radius:10px;box-shadow:0 12px 36px rgba(0,0,0,.5);max-width:80%;text-align:center;opacity:0;transition:opacity .25s ease,transform .25s ease;z-index:12;pointer-events:none}
+.cs-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 /* ===== Redesigned team view (shared by detailed + simplified) ===== */
 .tv{--tp:#E4324B;--ts:#15233f}
 .tv-head{position:relative;display:flex;gap:18px;align-items:stretch;padding:20px 24px;border-radius:16px;overflow:hidden;background:var(--panel);border:1px solid var(--border);margin-bottom:16px;min-height:300px}
