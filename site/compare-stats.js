@@ -111,7 +111,7 @@
     { key: "age", label: "Age", get: (p) => (typeof p.age === "number" ? p.age : "") },
     { key: "role", label: "Role", get: (p) => groupedRole(p) },
     { key: "type", label: "Type", get: (p) => (cs.discipline === "batting" ? p.role : p.bowling_type) },
-    { key: "hand", label: cs.discipline === "batting" ? "Bat Hand" : "Bowl Hand", get: (p) => (cs.discipline === "batting" ? p.batting_hand : p.bowling_hand) },
+    { key: "hand", get label() { return cs.discipline === "batting" ? "Bat Hand" : "Bowl Hand"; }, get: (p) => (cs.discipline === "batting" ? p.batting_hand : p.bowling_hand) },
     { key: "country", label: "Country", get: (p) => p.nationality },
   ];
 
@@ -146,6 +146,18 @@
   }
   function recomputeHi(d) {
     cs.hi[d] = new Set([...(cs.hiManual[d] || []), ...(cs.hiAuto[d] || [])]);
+  }
+  // Reset all column state for the current discipline to defaults:
+  // basic stats shown, advanced hidden, no attribute columns, no highlights.
+  function resetColsForCurrentDiscipline() {
+    const d = cs.discipline;
+    cs.hidden[d] = new Set(activeCols().filter((c) => c.group === "advanced").map((c) => c.key));
+    cs.order[d] = activeCols().map((c) => c.key);
+    cs.attrCols[d] = new Set();
+    cs.attrOrder[d] = ATTR_COLS.map((a) => a.key);
+    cs.hi[d] = new Set();
+    cs.hiManual[d] = new Set();
+    cs.hiAuto[d] = new Set();
   }
   // visible stat columns in custom order, minus hidden
   function visibleStatCols() {
@@ -1013,8 +1025,9 @@
     updateFilterLabels();
     cs.adv = freshAdv();         // clear any prior random advanced condition
     maybeRandomAdvanced(best);   // ~45% of the time, also throw an advanced/age condition
+    resetColsForCurrentDiscipline(); // randomise always starts from basic stats + no highlights
     renderAdvPanel();
-    runFilters();
+    runFilters();                // re-reveals + highlights only the randomised filters' columns
     if (window.track) track("compare_stats_randomise", { adv_conditions: advCount() });
   }
   window.csRandomise = randomise;
@@ -1155,14 +1168,8 @@
     // reset filters
     cs.filters = { role: "", type: "", hand: "", country: "" };
     updateFilterLabels();
-    // reset columns to default: basic shown, advanced hidden, default order, no attrs
-    cs.hidden[d] = new Set(activeCols().filter((c) => c.group === "advanced").map((c) => c.key));
-    cs.order[d] = activeCols().map((c) => c.key);
-    cs.attrCols[d] = new Set();
-    cs.attrOrder[d] = ATTR_COLS.map((a) => a.key);
-    cs.hi[d] = new Set();
-    cs.hiManual[d] = new Set();
-    cs.hiAuto[d] = new Set();
+    // reset columns to default: basic shown, advanced hidden, default order, no attrs/highlights
+    resetColsForCurrentDiscipline();
     cs.sortKey = null; cs.sortDir = "desc";
     cs.adv = freshAdv();
     syncAppliedFilters();
