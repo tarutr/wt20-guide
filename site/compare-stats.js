@@ -613,6 +613,8 @@
   function openAdvPopup() {
     ensureAdv();
     renderAdvPanel();
+    setDisciplineSeg(cs.discipline); // keep popup toggles in sync with current state
+    setRangeSeg(cs.range);
     const back = document.getElementById("cs-advback");
     if (back) back.classList.add("show");
     cs.advOpen = true;
@@ -856,6 +858,16 @@
               <div>
                 <div class="cs-advmodal-title">Advanced filters</div>
                 <div class="cs-advmodal-sub">Filter by any stat or by age. Add conditions, choose Match all (AND) or Match any (OR) within a group, and combine groups. Press Search to apply.</div>
+                <div class="cs-adv-toggles">
+                  <div class="cs-seg cs-seg-sm" id="cs-adv-discipline">
+                    <button data-v="batting" class="on">Batting</button>
+                    <button data-v="bowling">Bowling</button>
+                  </div>
+                  <div class="cs-seg cs-seg-sm" id="cs-adv-range">
+                    <button data-v="wc">WC</button>
+                    <button data-v="pre_wc" class="on">Since Last WC</button>
+                  </div>
+                </div>
               </div>
               <button class="cs-x" id="cs-advclose" aria-label="Close">&#10005;</button>
             </div>
@@ -871,28 +883,13 @@
       </div>`;
     document.body.appendChild(wrap);
 
-    // discipline toggle
-    wrap.querySelector("#cs-discipline").addEventListener("click", (e) => {
-      const b = e.target.closest("button"); if (!b) return;
-      setSeg("cs-discipline", b); cs.discipline = b.dataset.v;
-      cs.filters.type = ""; cs.filters.hand = "";
-      cs.sortKey = null;
-      cs.adv = freshAdv(); // advanced stat fields are discipline-specific
-      ensureColState();
-      updateFilterLabels();
-      syncAppliedFilters();
-      updateSearchPending();
-      updateMinInningsDefault();
-      renderAdvPanel();
-      renderTable();
-    });
-    // range toggle
-    wrap.querySelector("#cs-range").addEventListener("click", (e) => {
-      const b = e.target.closest("button"); if (!b) return;
-      setSeg("cs-range", b); cs.range = b.dataset.v;
-      updateMinInningsDefault();
-      renderTable();
-    });
+    // discipline + range toggles (main row AND the advanced popup stay in sync)
+    const onDisc = (e) => { const b = e.target.closest("button"); if (b) switchDiscipline(b.dataset.v); };
+    const onRange = (e) => { const b = e.target.closest("button"); if (b) switchRange(b.dataset.v); };
+    wrap.querySelector("#cs-discipline").addEventListener("click", onDisc);
+    wrap.querySelector("#cs-adv-discipline").addEventListener("click", onDisc);
+    wrap.querySelector("#cs-range").addEventListener("click", onRange);
+    wrap.querySelector("#cs-adv-range").addEventListener("click", onRange);
     // footer buttons
     wrap.querySelector("#cs-colbtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(openColMenu, "cs-colbtn"); });
     wrap.querySelector("#cs-hibtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(openHiMenu, "cs-hibtn"); });
@@ -930,6 +927,39 @@
   function setSeg(segId, btn) {
     document.querySelectorAll(`#${segId} button`).forEach((b) => b.classList.remove("on"));
     btn.classList.add("on");
+  }
+  function syncSeg(segId, value) {
+    const btn = document.querySelector(`#${segId} button[data-v="${value}"]`);
+    if (btn) setSeg(segId, btn);
+  }
+  function setDisciplineSeg(disc) { syncSeg("cs-discipline", disc); syncSeg("cs-adv-discipline", disc); }
+  function setRangeSeg(range) { syncSeg("cs-range", range); syncSeg("cs-adv-range", range); }
+
+  // Switch discipline from either the main row or the advanced popup. Resets the
+  // advanced builder (stat fields are discipline-specific) — same as before.
+  function switchDiscipline(disc) {
+    if (cs.discipline === disc) return;
+    cs.discipline = disc;
+    setDisciplineSeg(disc);
+    cs.filters.type = ""; cs.filters.hand = "";
+    cs.sortKey = null;
+    cs.adv = freshAdv();
+    ensureColState();
+    updateFilterLabels();
+    syncAppliedFilters();
+    updateSearchPending();
+    updateMinInningsDefault();
+    renderAdvPanel();
+    renderTable();
+  }
+  // Switch WC / Since-Last-WC range. Conditions are preserved (same stat fields,
+  // different values), so the advanced builder is untouched.
+  function switchRange(range) {
+    if (cs.range === range) return;
+    cs.range = range;
+    setRangeSeg(range);
+    updateMinInningsDefault();
+    renderTable();
   }
 
   function toggleRow(which) {
@@ -1091,13 +1121,13 @@
     // Randomiser always operates on Since-Last-WC data
     if (cs.range !== "pre_wc") {
       cs.range = "pre_wc";
-      setSeg("cs-range", document.querySelector('#cs-range button[data-v="pre_wc"]'));
+      setRangeSeg("pre_wc");
     }
     // Randomly choose a discipline and switch the toggle so the stats shown match
     const disc = pick(["batting", "bowling"]);
     if (cs.discipline !== disc) {
       cs.discipline = disc;
-      setSeg("cs-discipline", document.querySelector(`#cs-discipline button[data-v="${disc}"]`));
+      setDisciplineSeg(disc);
       cs.sortKey = null;
       ensureColState();
     }
