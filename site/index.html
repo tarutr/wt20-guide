@@ -36,12 +36,14 @@ html[data-theme="light"]{
   --text:#16213E;--dim:rgba(22,33,62,0.6);--faint:rgba(22,33,62,0.4);--hero:#15233F;
   --chip:#F1F2F4;--divider:rgba(0,0,0,0.08);--ph:#E9EAEE;--ph-ic:rgba(22,33,62,0.25);
   --splat-a:rgba(228,50,75,0.34);--splat-b:rgba(244,68,92,0.18);--radar-grid:rgba(22,33,62,0.16);--handle:#DEDEE2;
+  --cs-hi-cell:#FDE9ED;--cs-hi-head:#F9D6DD;
 }
 html[data-theme="dark"]{
   --bg:#08090D;--panel:#13151D;--panel-2:#0F1118;--border:rgba(255,255,255,0.08);--soft:rgba(255,255,255,0.05);
   --text:#F4F5F8;--dim:rgba(244,245,248,0.6);--faint:rgba(244,245,248,0.4);--hero:#FFFFFF;
   --chip:#1B1C24;--divider:rgba(255,255,255,0.08);--ph:#1B1C24;--ph-ic:rgba(255,255,255,0.28);
   --splat-a:rgba(228,50,75,0.45);--splat-b:rgba(244,68,92,0.24);--radar-grid:rgba(255,255,255,0.16);--handle:#23252F;
+  --cs-hi-cell:#2A1A20;--cs-hi-head:#37212A;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;height:100vh;overflow:hidden}
@@ -450,6 +452,8 @@ img{display:block}
 .cs-rm{background:none;border:none;color:var(--faint);font-size:13px;cursor:pointer;padding:4px;border-radius:5px;flex:none}
 .cs-rm:hover{color:var(--accent);background:var(--soft,rgba(255,255,255,.05))}
 .cs-table tbody td{color:var(--text);font-weight:600;border-bottom:1px solid var(--soft,rgba(255,255,255,.05))}
+.cs-table th.cs-hi,.cs-table td.cs-hi{background:var(--cs-hi-cell)}
+.cs-table thead th.cs-hi{background:var(--cs-hi-head);color:var(--accent)}
 .cs-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center}
 .cs-empty-h{font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px}
 .cs-empty-p{font-size:13px;color:var(--dim)}
@@ -478,6 +482,8 @@ img{display:block}
 .cs-fmenu-it.on{color:var(--accent)}
 .cs-rand:hover{border-color:var(--accent);color:var(--accent)}
 .cs-run{background:var(--accent);color:#fff;border:none;font-family:inherit;font-size:12px;font-weight:700;padding:8px 18px;border-radius:8px;cursor:pointer}
+.cs-run.cs-run-idle{background:none;border:1px solid var(--border);color:var(--dim);font-weight:600}
+.cs-run.cs-run-idle:hover{color:var(--accent);border-color:var(--accent)}
 .cs-sentence{padding:12px 22px 0;font-size:12.5px;font-style:italic;color:var(--dim)}
 /* Stage C: footer, menus, sort/drag */
 .cs-foot{flex:none;display:flex;align-items:center;gap:12px;padding:13px 22px;border-top:1px solid var(--border)}

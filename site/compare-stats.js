@@ -65,6 +65,10 @@
     order: {}, // { batting: [keys...], bowling: [keys...] } custom STAT column order
     attrOrder: {}, // { batting: [attr keys...], bowling: [...] } custom ATTR order
     attrCols: {}, // { batting: Set(attr keys shown), bowling: Set(...) } e.g. 'role','country'
+    hi: {}, // { batting: Set(effective highlighted keys), bowling: Set(...) } = manual ∪ auto
+    hiManual: {}, // highlights the user set by hand (persist across searches)
+    hiAuto: {}, // filter-driven highlights (recomputed fresh on each search)
+    appliedFilters: { role: "", type: "", hand: "", country: "" }, // simple filters at last apply
     minInnings: { batting: 10, bowling: 10 }, // default for pre_wc; reset on range toggle
     adv: null, // advanced builder: { top:'AND'|'OR', groups:[{conn, conds:[{field,op,v1,v2}]}] }
     advOpen: false, // is the advanced panel expanded?
@@ -104,6 +108,7 @@
     return p.role || "—";
   }
   const ATTR_COLS = [
+    { key: "age", label: "Age", get: (p) => (typeof p.age === "number" ? p.age : "") },
     { key: "role", label: "Role", get: (p) => groupedRole(p) },
     { key: "type", label: "Type", get: (p) => (cs.discipline === "batting" ? p.role : p.bowling_type) },
     { key: "hand", label: cs.discipline === "batting" ? "Bat Hand" : "Bowl Hand", get: (p) => (cs.discipline === "batting" ? p.batting_hand : p.bowling_hand) },
@@ -135,6 +140,12 @@
     if (!cs.order[d]) cs.order[d] = activeCols().map((c) => c.key);
     if (!cs.attrCols[d]) cs.attrCols[d] = new Set();
     if (!cs.attrOrder[d]) cs.attrOrder[d] = ATTR_COLS.map((a) => a.key);
+    if (!cs.hi[d]) cs.hi[d] = new Set();
+    if (!cs.hiManual[d]) cs.hiManual[d] = new Set();
+    if (!cs.hiAuto[d]) cs.hiAuto[d] = new Set();
+  }
+  function recomputeHi(d) {
+    cs.hi[d] = new Set([...(cs.hiManual[d] || []), ...(cs.hiAuto[d] || [])]);
   }
   // visible stat columns in custom order, minus hidden
   function visibleStatCols() {
@@ -225,6 +236,7 @@
     const statCol = activeCols().find((c) => c.key === key);
     const val = (p) => {
       if (key === "name") return p.name.toLowerCase();
+      if (key === "age") return typeof p.age === "number" ? p.age : -Infinity;
       if (attr) return (attr.get(p) || "").toString().toLowerCase();
       if (statCol) { const v = colVal(p, statCol); return v == null ? -Infinity : Number(v); }
       return 0;
@@ -287,6 +299,50 @@
     armOutsideClose();
   }
 
+  // ---- Highlight columns menu --------------------------------------------
+  function openHiMenu() {
+    closeAnyMenu();
+    ensureColState();
+    const d = cs.discipline;
+    const anchor = document.getElementById("cs-hibtn");
+    const menu = document.createElement("div");
+    menu.className = "cs-popmenu cs-colmenu cs-himenu"; menu.id = "cs-popmenu";
+    const mkStat = (c) => {
+      const on = cs.hi[d].has(c.key);
+      return `<div class="cs-colit ${on ? "on" : ""}" data-key="${c.key}">
+        <span class="cs-box"></span>${c.label}</div>`;
+    };
+    const mkAttr = (a) => {
+      const on = cs.hi[d].has(a.key);
+      return `<div class="cs-colit ${on ? "on" : ""}" data-key="${a.key}">
+        <span class="cs-box"></span>${a.label}</div>`;
+    };
+    const basicItems = activeCols().filter((c) => c.group === "basic").map(mkStat).join("");
+    const advItems = activeCols().filter((c) => c.group === "advanced").map(mkStat).join("");
+    const attrItems = ATTR_COLS.map(mkAttr).join("");
+    menu.innerHTML =
+      `<div class="cs-colmenu-h">Basic Stats</div><div class="cs-colgrid">${basicItems}</div>` +
+      `<div class="cs-colmenu-h">Advanced Stats</div><div class="cs-colgrid">${advItems}</div>` +
+      `<div class="cs-colmenu-h">Attributes</div><div class="cs-colgrid">${attrItems}</div>`;
+    anchor.appendChild(menu);
+    menu.querySelectorAll(".cs-colit").forEach((it) => {
+      it.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const key = it.dataset.key;
+        if (cs.hi[d].has(key)) {            // turning off: clear from both layers
+          cs.hiManual[d].delete(key);
+          cs.hiAuto[d].delete(key);
+        } else {                            // turning on: a manual highlight (persists)
+          cs.hiManual[d].add(key);
+        }
+        recomputeHi(d);
+        it.classList.toggle("on", cs.hi[d].has(key));
+        renderTable();
+      });
+    });
+    armOutsideClose();
+  }
+
   // ---- Sort By menu -------------------------------------------------------
   function openSortMenu() {
     closeAnyMenu();
@@ -320,6 +376,7 @@
     setTimeout(() => {
       document.addEventListener("click", function handler(e) {
         if (e.target.closest("#cs-popmenu") || e.target.closest("#cs-colbtn") ||
+            e.target.closest("#cs-hibtn") ||
             e.target.closest("#cs-sortbtn") || e.target.closest("#cs-mininnbtn")) {
           document.addEventListener("click", handler, { once: true }); return;
         }
@@ -666,6 +723,7 @@
 
         <div class="cs-foot">
           <div class="cs-foot-btn" id="cs-colbtn">&#9776; Show / hide columns</div>
+          <div class="cs-foot-btn" id="cs-hibtn">&#9728; Highlight columns</div>
           <div class="cs-foot-btn" id="cs-sortbtn">&#8645; Sort by</div>
           <div class="cs-foot-mininn">
             <span class="cs-mininn-lab">Min Innings</span>
@@ -703,6 +761,8 @@
       cs.adv = freshAdv(); // advanced stat fields are discipline-specific
       ensureColState();
       updateFilterLabels();
+      syncAppliedFilters();
+      updateSearchPending();
       updateMinInningsDefault();
       renderAdvPanel();
       renderTable();
@@ -716,6 +776,7 @@
     });
     // footer buttons
     wrap.querySelector("#cs-colbtn").addEventListener("click", (e) => { e.stopPropagation(); openColMenu(); });
+    wrap.querySelector("#cs-hibtn").addEventListener("click", (e) => { e.stopPropagation(); openHiMenu(); });
     wrap.querySelector("#cs-sortbtn").addEventListener("click", (e) => { e.stopPropagation(); openSortMenu(); });
     wrap.querySelector("#cs-mininnbtn").addEventListener("click", (e) => { e.stopPropagation(); openMinInnMenu(); });
     // filter dropdowns
@@ -734,6 +795,7 @@
     wrap.querySelector("#cs-advback").addEventListener("click", (e) => { if (e.target.id === "cs-advback") closeAdvPopup(); });
     ensureAdv();
     renderAdvPanel();
+    updateSearchPending();
     // row chevrons (collapse each row independently)
     wrap.querySelector("#cs-chev-search").addEventListener("click", () => toggleRow("search"));
     wrap.querySelector("#cs-chev-filter").addEventListener("click", () => toggleRow("filter"));
@@ -808,6 +870,7 @@
         e.stopPropagation();
         cs.filters[which] = it.dataset.v;
         updateFilterLabels();
+        updateSearchPending();
         closeFilterMenu();
       });
     });
@@ -842,8 +905,47 @@
     if (f.country && p.nationality !== f.country) return false;
     return true;
   }
+  // When filters run: reveal the columns the user filtered on (additive), and
+  // set the filter-driven highlights FRESH for this search. Columns highlighted
+  // by hand (hiManual) persist; only the auto layer is recomputed.
+  function applyFilterColumnEffects() {
+    const d = cs.discipline;
+    ensureColState();
+    const auto = new Set();
+    // advanced conditions -> reveal + auto-highlight stat/age columns
+    advActiveGroups().forEach((g) =>
+      groupActiveConds(g).forEach((c) => {
+        if (!c.field) return;
+        if (c.field === "__age") { cs.attrCols[d].add("age"); auto.add("age"); }
+        else { cs.hidden[d].delete(c.field); auto.add(c.field); }
+      })
+    );
+    // simple filters -> reveal + auto-highlight their attribute columns
+    ["role", "type", "hand", "country"].forEach((fk) => {
+      if (cs.filters[fk]) { cs.attrCols[d].add(fk); auto.add(fk); }
+    });
+    cs.hiAuto[d] = auto;   // fresh each search
+    recomputeHi(d);        // effective = manual ∪ auto
+  }
+
+  // ---- Search "pending" cue (simple filters changed but not yet applied) ----
+  function filtersChanged() {
+    const a = cs.appliedFilters, f = cs.filters;
+    return a.role !== f.role || a.type !== f.type || a.hand !== f.hand || a.country !== f.country;
+  }
+  function syncAppliedFilters() {
+    cs.appliedFilters = { role: cs.filters.role, type: cs.filters.type, hand: cs.filters.hand, country: cs.filters.country };
+  }
+  function updateSearchPending() {
+    const btn = document.getElementById("cs-run");
+    if (btn) btn.classList.toggle("cs-run-idle", !filtersChanged());
+  }
+
   function runFilters() {
     cs.rows = DATA.players.filter((p) => playerMatchesFilters(p) && playerMatchesAdvanced(p));
+    applyFilterColumnEffects();
+    syncAppliedFilters();
+    updateSearchPending();
     renderTable();
     if (window.track) track("compare_stats_run_filters", {
       role: cs.filters.role || "all", type: cs.filters.type || "all",
@@ -1058,8 +1160,13 @@
     cs.order[d] = activeCols().map((c) => c.key);
     cs.attrCols[d] = new Set();
     cs.attrOrder[d] = ATTR_COLS.map((a) => a.key);
+    cs.hi[d] = new Set();
+    cs.hiManual[d] = new Set();
+    cs.hiAuto[d] = new Set();
     cs.sortKey = null; cs.sortDir = "desc";
     cs.adv = freshAdv();
+    syncAppliedFilters();
+    updateSearchPending();
     renderAdvPanel();
     renderTable();
   };
@@ -1137,11 +1244,13 @@
     ];
 
     const sortInd = (key) => cs.sortKey === key ? `<span class="cs-sortind">${cs.sortDir === "asc" ? "▲" : "▼"}</span>` : "";
+    const hiSet = cs.hi[cs.discipline] || new Set();
     const colRow = `<tr>
       <th class="cs-col-player cs-sortable" data-sortkey="name">Player ${sortInd("name")}</th>
       ${allCols.map((c) => {
         const tip = c.kind === "stat" && GLOSS[c.key] ? ` data-tip="${GLOSS[c.key].replace(/"/g, "&quot;")}"` : "";
-        return `<th class="cs-sortable cs-draggable" draggable="true" data-sortkey="${c.key}" data-colkey="${c.key}" data-kind="${c.kind}" data-section="${c.section}"${tip}>${c.label} ${sortInd(c.key)}</th>`;
+        const hi = hiSet.has(c.key) ? " cs-hi" : "";
+        return `<th class="cs-sortable cs-draggable${hi}" draggable="true" data-sortkey="${c.key}" data-colkey="${c.key}" data-kind="${c.kind}" data-section="${c.section}"${tip}>${c.label} ${sortInd(c.key)}</th>`;
       }).join("")}
     </tr>`;
 
@@ -1150,11 +1259,12 @@
     const body = `<tbody>${rows.map((p) => {
       const c = pal(p).p;
       const cells = allCols.map((cc) => {
+        const hi = hiSet.has(cc.key) ? " class=\"cs-hi\"" : "";
         if (cc.kind === "attr") {
           const a = ATTR_COLS.find((x) => x.key === cc.key);
-          return `<td>${a ? (a.get(p) || "—") : "—"}</td>`;
+          return `<td${hi}>${a ? (a.get(p) || "—") : "—"}</td>`;
         }
-        return `<td>${fmt(colVal(p, cc.col), cc.col.dp)}</td>`;
+        return `<td${hi}>${fmt(colVal(p, cc.col), cc.col.dp)}</td>`;
       }).join("");
       return `<tr>
         <td class="cs-col-player">
