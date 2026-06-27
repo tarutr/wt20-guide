@@ -932,8 +932,10 @@
         else { cs.hidden[d].delete(c.field); auto.add(c.field); }
       })
     );
-    // simple filters -> reveal + auto-highlight their attribute columns
-    ["role", "type", "hand", "country"].forEach((fk) => {
+    // simple filters -> reveal + auto-highlight their attribute columns.
+    // Country is intentionally excluded: the flag in the Player column already
+    // conveys nationality, so it doesn't need its own column.
+    ["role", "type", "hand"].forEach((fk) => {
       if (cs.filters[fk]) { cs.attrCols[d].add(fk); auto.add(fk); }
     });
     cs.hiAuto[d] = auto;   // fresh each search
@@ -1257,7 +1259,12 @@
       ${allCols.map((c) => {
         const tip = c.kind === "stat" && GLOSS[c.key] ? ` data-tip="${GLOSS[c.key].replace(/"/g, "&quot;")}"` : "";
         const hi = hiSet.has(c.key) ? " cs-hi" : "";
-        return `<th class="cs-sortable cs-draggable${hi}" draggable="true" data-sortkey="${c.key}" data-colkey="${c.key}" data-kind="${c.kind}" data-section="${c.section}"${tip}>${c.label} ${sortInd(c.key)}</th>`;
+        const hiOn = hiSet.has(c.key) ? " on" : "";
+        const hover = `<span class="cs-colhover">`
+          + `<span class="cs-colh-btn cs-colh-hi${hiOn}" data-act="hi" data-key="${c.key}" data-kind="${c.kind}" title="Highlight column">&#9728;</span>`
+          + `<span class="cs-colh-btn cs-colh-x" data-act="hide" data-key="${c.key}" data-kind="${c.kind}" title="Hide column">&#10005;</span>`
+          + `</span>`;
+        return `<th class="cs-sortable cs-draggable${hi}" draggable="true" data-sortkey="${c.key}" data-colkey="${c.key}" data-kind="${c.kind}" data-section="${c.section}"${tip}>${c.label} ${sortInd(c.key)}${hover}</th>`;
       }).join("")}
     </tr>`;
 
@@ -1300,6 +1307,24 @@
       th.addEventListener("click", () => {
         if (th._dragged) { th._dragged = false; return; }
         applySort(th.dataset.sortkey);
+      });
+    });
+    // hover shortcuts on column headers: highlight (sun) + hide (x)
+    table.querySelectorAll(".cs-colhover .cs-colh-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation(); // don't trigger the header's sort
+        const d = cs.discipline;
+        const key = btn.dataset.key, kind = btn.dataset.kind, act = btn.dataset.act;
+        ensureColState();
+        if (act === "hide") {
+          if (kind === "attr") cs.attrCols[d].delete(key);
+          else cs.hidden[d].add(key);
+        } else { // toggle a manual highlight (persists like the Highlight menu)
+          if (cs.hi[d].has(key)) { cs.hiManual[d].delete(key); cs.hiAuto[d].delete(key); }
+          else cs.hiManual[d].add(key);
+          recomputeHi(d);
+        }
+        renderTable();
       });
     });
     table.querySelectorAll('th.cs-draggable[draggable="true"]').forEach((th) => {
