@@ -301,36 +301,63 @@
     const anchor = document.getElementById("cs-colbtn");
     const menu = document.createElement("div");
     menu.className = "cs-popmenu cs-colmenu"; menu.id = "cs-popmenu";
-    const mkStat = (c) => {
-      const shown = !cs.hidden[d].has(c.key);
-      return `<div class="cs-colit ${shown ? "on" : ""}" data-kind="stat" data-key="${c.key}">
-        <span class="cs-box"></span>${c.label}</div>`;
-    };
-    const basicItems = activeCols().filter((c) => c.group === "basic").map(mkStat).join("");
-    const advItems = activeCols().filter((c) => c.group === "advanced").map(mkStat).join("");
-    const attrItems = ATTR_COLS.map((a) => {
-      const shown = cs.attrCols[d].has(a.key);
-      return `<div class="cs-colit ${shown ? "on" : ""}" data-kind="attr" data-key="${a.key}">
-        <span class="cs-box"></span>${a.label}</div>`;
-    }).join("");
-    menu.innerHTML =
-      `<div class="cs-colmenu-h">Basic Stats</div><div class="cs-colgrid">${basicItems}</div>` +
-      `<div class="cs-colmenu-h">Advanced Stats</div><div class="cs-colgrid">${advItems}</div>` +
-      `<div class="cs-colmenu-h">Attributes</div><div class="cs-colgrid">${attrItems}</div>`;
     anchor.appendChild(menu);
-    menu.querySelectorAll(".cs-colit").forEach((it) => {
-      it.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const key = it.dataset.key;
-        if (it.dataset.kind === "stat") {
-          if (cs.hidden[d].has(key)) cs.hidden[d].delete(key); else cs.hidden[d].add(key);
-        } else {
-          if (cs.attrCols[d].has(key)) cs.attrCols[d].delete(key); else cs.attrCols[d].add(key);
-        }
-        it.classList.toggle("on");
-        renderTable();
+
+    const basicCols = () => activeCols().filter((c) => c.group === "basic");
+    const advCols = () => activeCols().filter((c) => c.group === "advanced");
+    const statShown = (c) => !cs.hidden[d].has(c.key);
+    const attrShown = (a) => cs.attrCols[d].has(a.key);
+    const secState = (items, shownFn) => {
+      const n = items.filter(shownFn).length;
+      return n === 0 ? "" : (n === items.length ? "on" : "ind"); // "" none, on all, ind mixed
+    };
+    const header = (label, section, state) =>
+      `<div class="cs-colmenu-h cs-secsel ${state}" data-section="${section}"><span class="cs-box"></span>${label}</div>`;
+    const mkStat = (c) =>
+      `<div class="cs-colit ${statShown(c) ? "on" : ""}" data-kind="stat" data-key="${c.key}"><span class="cs-box"></span>${c.label}</div>`;
+    const mkAttr = (a) =>
+      `<div class="cs-colit ${attrShown(a) ? "on" : ""}" data-kind="attr" data-key="${a.key}"><span class="cs-box"></span>${a.label}</div>`;
+
+    function build() {
+      const b = basicCols(), adv = advCols();
+      menu.innerHTML =
+        header("Basic Stats", "basic", secState(b, statShown)) + `<div class="cs-colgrid">${b.map(mkStat).join("")}</div>` +
+        header("Advanced Stats", "advanced", secState(adv, statShown)) + `<div class="cs-colgrid">${adv.map(mkStat).join("")}</div>` +
+        header("Attributes", "attr", secState(ATTR_COLS, attrShown)) + `<div class="cs-colgrid">${ATTR_COLS.map(mkAttr).join("")}</div>`;
+      wire();
+    }
+    function wire() {
+      // section select-all / deselect-all
+      menu.querySelectorAll(".cs-secsel").forEach((h) => {
+        h.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const section = h.dataset.section;
+          if (section === "attr") {
+            const all = ATTR_COLS.every(attrShown);
+            ATTR_COLS.forEach((a) => { if (all) cs.attrCols[d].delete(a.key); else cs.attrCols[d].add(a.key); });
+          } else {
+            const cols = section === "basic" ? basicCols() : advCols();
+            const all = cols.every(statShown);
+            cols.forEach((c) => { if (all) cs.hidden[d].add(c.key); else cs.hidden[d].delete(c.key); });
+          }
+          build(); renderTable();
+        });
       });
-    });
+      // individual columns
+      menu.querySelectorAll(".cs-colit").forEach((it) => {
+        it.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const key = it.dataset.key;
+          if (it.dataset.kind === "stat") {
+            if (cs.hidden[d].has(key)) cs.hidden[d].delete(key); else cs.hidden[d].add(key);
+          } else {
+            if (cs.attrCols[d].has(key)) cs.attrCols[d].delete(key); else cs.attrCols[d].add(key);
+          }
+          build(); renderTable();
+        });
+      });
+    }
+    build();
     armOutsideClose();
   }
 
@@ -407,6 +434,14 @@
     const m = document.getElementById("cs-popmenu");
     if (m) m.remove();
   }
+  // Toggle a footer menu: if this button's menu is already open, close it;
+  // otherwise open it (openFn closes any other open menu first).
+  function toggleMenu(openFn, anchorId) {
+    const open = document.getElementById("cs-popmenu");
+    const anchor = document.getElementById(anchorId);
+    if (open && anchor && anchor.contains(open)) { closeAnyMenu(); return; }
+    openFn();
+  }
   function armOutsideClose() {
     setTimeout(() => {
       document.addEventListener("click", function handler(e) {
@@ -448,35 +483,59 @@
     { v: "btw", sym: "between", word: "between" },
   ];
   const OP_SYM = { gt: ">", lt: "<", gte: "≥", lte: "≤", btw: "between" };
+  const ADV_CAT_OPS = [{ v: "is", word: "is" }, { v: "isnot", word: "is not" }];
 
   function newAdvCond() { return { field: "", op: "gt", v1: "", v2: "" }; }
   function newAdvGroup() { return { conn: "AND", conds: [newAdvCond()] }; }
   function freshAdv() { return { top: "AND", groups: [newAdvGroup()] }; }
   function ensureAdv() { if (!cs.adv) cs.adv = freshAdv(); }
 
-  // Selectable fields = Age (discipline-independent) + the current discipline's stat columns.
+  // Selectable fields = Age + categorical attributes (Role/Type/Hand/Country) +
+  // the current discipline's stat columns.
   function advFields() {
     const stats = activeCols().map((c) => ({ key: c.key, label: c.label, dp: c.dp || 0, src: c.src || null }));
-    return [{ key: "__age", label: "Age", dp: 0, age: true }, ...stats];
+    const handLabel = cs.discipline === "batting" ? "Bat Hand" : "Bowl Hand";
+    const cats = [
+      { key: "__role", label: "Role", cat: true, dim: "role" },
+      { key: "__type", label: "Type", cat: true, dim: "type" },
+      { key: "__hand", label: handLabel, cat: true, dim: "hand" },
+      { key: "__country", label: "Country", cat: true, dim: "country" },
+    ];
+    return [{ key: "__age", label: "Age", dp: 0, age: true }, ...cats, ...stats];
   }
   function advFieldByKey(k) { return advFields().find((f) => f.key === k) || null; }
   function advFieldVal(p, field) {
-    if (!field) return null;
+    if (!field || field.cat) return null;
     if (field.age) return typeof p.age === "number" ? p.age : null;
     let v;
     if (field.src === "graph") v = (p.graph_data || {})[field.key];
     else v = (statsFor(p) || {})[field.key];
     return typeof v === "number" && !Number.isNaN(v) ? v : null;
   }
+  // Does player p's attribute (dim) equal value? Mirrors the simple-filter logic.
+  function catMatch(p, dim, value) {
+    if (dim === "role") return roleMatch(p, value);
+    if (dim === "type") return (cs.discipline === "batting" ? p.role : p.bowling_type) === value;
+    if (dim === "hand") return (cs.discipline === "batting" ? p.batting_hand : p.bowling_hand) === value;
+    if (dim === "country") return p.nationality === value;
+    return false;
+  }
 
   function condComplete(c) {
     if (!c.field) return false;
+    const f = advFieldByKey(c.field);
+    if (f && f.cat) return c.v1 !== "" && c.v1 != null;
     if (c.v1 === "" || c.v1 == null || Number.isNaN(parseFloat(c.v1))) return false;
     if (c.op === "btw" && (c.v2 === "" || c.v2 == null || Number.isNaN(parseFloat(c.v2)))) return false;
     return true;
   }
   function condEval(p, c) {
-    const val = advFieldVal(p, advFieldByKey(c.field));
+    const f = advFieldByKey(c.field);
+    if (f && f.cat) {
+      const m = catMatch(p, f.dim, c.v1);
+      return c.op === "isnot" ? !m : m;
+    }
+    const val = advFieldVal(p, f);
     if (val == null) return false;
     const a = parseFloat(c.v1);
     switch (c.op) {
@@ -515,6 +574,10 @@
   function condPhrase(c) {
     const f = advFieldByKey(c.field);
     const lab = f ? f.label : c.field;
+    if (f && f.cat) {
+      const opt = filterOptions(f.dim).find((o) => o.v === c.v1);
+      return `${lab} ${c.op === "isnot" ? "is not" : "is"} ${opt ? opt.label : c.v1}`;
+    }
     if (c.op === "btw") {
       const a = parseFloat(c.v1), b = parseFloat(c.v2);
       return `${lab} between ${plainNum(Math.min(a, b))} and ${plainNum(Math.max(a, b))}`;
@@ -562,21 +625,33 @@
 
   function fieldSelectHTML(c) {
     const fields = advFields();
-    const stats = fields.filter((f) => !f.age);
+    const stats = fields.filter((f) => !f.age && !f.cat);
+    const cats = fields.filter((f) => f.cat);
+    const ageF = fields.find((f) => f.age);
     const discLabel = cs.discipline === "batting" ? "Batting stats" : "Bowling stats";
     const opt = (f) => `<option value="${f.key}" ${c.field === f.key ? "selected" : ""}>${f.label}</option>`;
     return `<select class="cs-csel cs-csel-field" data-role="field">
-        <option value="" ${!c.field ? "selected" : ""}>Stat…</option>
-        <optgroup label="Player">${opt({ key: "__age", label: "Age" })}</optgroup>
+        <option value="" ${!c.field ? "selected" : ""}>Field…</option>
+        <optgroup label="Attributes">${opt(ageF)}${cats.map(opt).join("")}</optgroup>
         <optgroup label="${discLabel}">${stats.map(opt).join("")}</optgroup>
       </select>`;
   }
   function opSelectHTML(c) {
+    const f = advFieldByKey(c.field);
+    const ops = (f && f.cat) ? ADV_CAT_OPS : ADV_OPS;
     return `<select class="cs-csel cs-csel-op" data-role="op">
-      ${ADV_OPS.map((o) => `<option value="${o.v}" ${c.op === o.v ? "selected" : ""}>${o.word}</option>`).join("")}
+      ${ops.map((o) => `<option value="${o.v}" ${c.op === o.v ? "selected" : ""}>${o.word}</option>`).join("")}
     </select>`;
   }
   function valInputsHTML(c) {
+    const f = advFieldByKey(c.field);
+    if (f && f.cat) {
+      const opts = filterOptions(f.dim);
+      return `<select class="cs-csel cs-cval-sel" data-role="v1">
+          <option value="" ${!c.v1 ? "selected" : ""}>Select…</option>
+          ${opts.map((o) => `<option value="${o.v}" ${c.v1 === o.v ? "selected" : ""}>${o.label}</option>`).join("")}
+        </select>`;
+    }
     if (c.op === "btw") {
       return `<input class="cs-cval" data-role="v1" type="number" inputmode="decimal" value="${c.v1}" placeholder="min">
               <span class="cs-cand">and</span>
@@ -660,19 +735,28 @@
         const c = g.conds[ci];
         if (!c) return;
         condEl.querySelector('[data-role="field"]').addEventListener("change", (e) => {
-          c.field = e.target.value; renderAdvPanel();
+          c.field = e.target.value;
+          const f = advFieldByKey(c.field);
+          if (f && f.cat) {
+            if (c.op !== "is" && c.op !== "isnot") c.op = "is";
+            if (!filterOptions(f.dim).some((o) => o.v === c.v1)) c.v1 = "";
+            c.v2 = "";
+          } else if (c.op === "is" || c.op === "isnot") {
+            c.op = "gt"; // switching from categorical back to a numeric field
+          }
+          renderAdvPanel();
         });
         condEl.querySelector('[data-role="op"]').addEventListener("change", (e) => {
           const was = c.op; c.op = e.target.value;
           // re-render only when crossing the between boundary (changes input count)
           if ((was === "btw") !== (c.op === "btw")) renderAdvPanel();
         });
-        // value inputs update state live WITHOUT re-render (preserve typing focus)
+        // value controls update state live; selects fire "change", inputs "input"
         condEl.querySelectorAll('[data-role="v1"],[data-role="v2"]').forEach((inp) => {
-          inp.addEventListener("input", (e) => {
+          ["input", "change"].forEach((ev) => inp.addEventListener(ev, (e) => {
             c[e.target.dataset.role] = e.target.value;
             updateAdvToggle();
-          });
+          }));
         });
         const rc = condEl.querySelector('[data-role="rmcond"]');
         if (rc) rc.addEventListener("click", () => {
@@ -810,10 +894,10 @@
       renderTable();
     });
     // footer buttons
-    wrap.querySelector("#cs-colbtn").addEventListener("click", (e) => { e.stopPropagation(); openColMenu(); });
-    wrap.querySelector("#cs-hibtn").addEventListener("click", (e) => { e.stopPropagation(); openHiMenu(); });
-    wrap.querySelector("#cs-sortbtn").addEventListener("click", (e) => { e.stopPropagation(); openSortMenu(); });
-    wrap.querySelector("#cs-mininnbtn").addEventListener("click", (e) => { e.stopPropagation(); openMinInnMenu(); });
+    wrap.querySelector("#cs-colbtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(openColMenu, "cs-colbtn"); });
+    wrap.querySelector("#cs-hibtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(openHiMenu, "cs-hibtn"); });
+    wrap.querySelector("#cs-sortbtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(openSortMenu, "cs-sortbtn"); });
+    wrap.querySelector("#cs-mininnbtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(openMinInnMenu, "cs-mininnbtn"); });
     // filter dropdowns
     wrap.querySelector("#cs-f-role").addEventListener("click", () => openFilterMenu("role"));
     wrap.querySelector("#cs-f-type").addEventListener("click", () => openFilterMenu("type"));
@@ -947,12 +1031,16 @@
     const d = cs.discipline;
     ensureColState();
     const auto = new Set();
-    // advanced conditions -> reveal + auto-highlight stat/age columns
+    // advanced conditions -> reveal + auto-highlight the column they reference
     advActiveGroups().forEach((g) =>
       groupActiveConds(g).forEach((c) => {
         if (!c.field) return;
+        const f = advFieldByKey(c.field);
         if (c.field === "__age") { cs.attrCols[d].add("age"); auto.add("age"); }
-        else { cs.hidden[d].delete(c.field); auto.add(c.field); }
+        else if (f && f.cat) {
+          if (f.dim === "country") return; // flag covers nationality
+          cs.attrCols[d].add(f.dim); auto.add(f.dim); // dim matches the attr-column key
+        } else { cs.hidden[d].delete(c.field); auto.add(c.field); }
       })
     );
     // simple filters -> reveal + auto-highlight their attribute columns.
@@ -1040,8 +1128,8 @@
         const v = (statsFor(p) || {})[ik];
         return typeof v === "number" ? v >= minInn : minInn === 0;
       }).length;
-      if (count >= MIN && count <= 60) { best = trial; break; }
-      if (count >= MIN && !best) best = trial; // fallback: any combo with >=5 and >=2 filters
+      if (count >= 10 && count <= 60) { best = trial; break; } // headroom for an advanced stat condition
+      if (count >= MIN && count <= 60 && !best) best = trial;   // fallback: any combo with >=5
     }
     if (!best) {
       // fallback that still uses two filters: a country + a common role
@@ -1049,8 +1137,9 @@
     }
     cs.filters = best;
     updateFilterLabels();
-    cs.adv = freshAdv();         // clear any prior random advanced condition
-    maybeRandomAdvanced(best);   // ~45% of the time, also throw an advanced/age condition
+    cs.adv = freshAdv();
+    const advCond = randomAdvancedStat(best); // ALWAYS layer one advanced STAT condition
+    if (advCond) cs.adv = { top: "AND", groups: [{ conn: "AND", conds: [advCond] }] };
     resetColsForCurrentDiscipline(); // randomise always starts from basic stats + no highlights
     renderAdvPanel();
     runFilters();                // re-reveals + highlights only the randomised filters' columns
@@ -1058,12 +1147,11 @@
   }
   window.csRandomise = randomise;
 
-  // Sometimes layer one advanced (stat or age) condition on top of the random
-  // simple filters. The threshold is derived from the candidate set so the
-  // combined result still clears the >=5 floor (we keep >=5 survivors).
+  // Build ONE advanced STAT condition (never age/attributes) for the randomiser.
+  // The threshold is derived from the candidate set so the combined result still
+  // clears the >=5 floor. Returns a condition object, or null if impossible.
   function roundTo(n, dp) { const f = Math.pow(10, dp); return Math.round(n * f) / f; }
-  function maybeRandomAdvanced(simpleFilters) {
-    if (Math.random() > 0.45) return;
+  function randomAdvancedStat(simpleFilters) {
     const minInn = cs.minInnings[cs.discipline] || 0;
     const ik = inningsKey();
     const cands = DATA.players.filter((p) => {
@@ -1071,30 +1159,35 @@
       const v = (statsFor(p) || {})[ik];
       return typeof v === "number" ? v >= minInn : minInn === 0;
     });
-    if (cands.length < 9) return; // not enough headroom to narrow further
-    const useAge = Math.random() < 0.25;
-    let field;
-    if (useAge) field = { key: "__age", age: true, dp: 0, label: "Age" };
-    else {
-      const col = activeCols()[Math.floor(Math.random() * activeCols().length)];
-      field = { key: col.key, dp: col.dp || 0, src: col.src || null, label: col.label };
+    if (cands.length < 5) return null;
+    const shuffle = (arr) => arr.map((v) => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+    for (const col of shuffle(activeCols().slice())) {
+      const field = { key: col.key, dp: col.dp || 0, src: col.src || null, label: col.label };
+      const vals = cands.map((p) => advFieldVal(p, field)).filter((v) => typeof v === "number").sort((a, b) => a - b);
+      if (vals.length < 5) continue;
+      const gt = Math.random() < 0.5;
+      const dp = field.dp || 0;
+      const step = dp > 0 ? 1 / Math.pow(10, dp) : 1;
+      const survivorsFor = (t) => cands.filter((p) => {
+        const v = advFieldVal(p, field);
+        return typeof v === "number" && (gt ? v > t : v < t);
+      }).length;
+      const keepFrac = 0.4 + Math.random() * 0.3; // aim to keep ~40-70%
+      let thr, guard = 0;
+      if (gt) {
+        let idx = Math.min(Math.floor((1 - keepFrac) * vals.length), vals.length - 5);
+        thr = roundTo(vals[Math.max(idx, 0)], dp);
+        while (survivorsFor(thr) < 5 && guard++ < vals.length + 4) thr = roundTo(thr - step, dp); // loosen until >=5
+      } else {
+        let idx = Math.max(Math.ceil(keepFrac * vals.length), 5);
+        thr = roundTo(vals[Math.min(idx, vals.length - 1)], dp);
+        while (survivorsFor(thr) < 5 && guard++ < vals.length + 4) thr = roundTo(thr + step, dp);
+      }
+      if (survivorsFor(thr) >= 5) {
+        return { field: field.key, op: gt ? "gt" : "lt", v1: String(thr), v2: "" };
+      }
     }
-    const vals = cands.map((p) => advFieldVal(p, field)).filter((v) => typeof v === "number").sort((a, b) => a - b);
-    if (vals.length < 7) return;
-    const gt = Math.random() < 0.5;
-    const keepFrac = 0.4 + Math.random() * 0.3; // keep ~40-70%
-    let thr;
-    if (gt) { const idx = Math.floor((1 - keepFrac) * vals.length); thr = vals[Math.min(Math.max(idx, 0), vals.length - 2)]; }
-    else { const idx = Math.ceil(keepFrac * vals.length); thr = vals[Math.min(Math.max(idx, 1), vals.length - 1)]; }
-    thr = roundTo(thr, field.dp || 0);
-    const op = gt ? "gt" : "lt";
-    const survivors = cands.filter((p) => {
-      const v = advFieldVal(p, field);
-      if (typeof v !== "number") return false;
-      return gt ? v > thr : v < thr;
-    }).length;
-    if (survivors < 5) return; // keep the >=5 floor
-    cs.adv = { top: "AND", groups: [{ conn: "AND", conds: [{ field: field.key, op, v1: String(thr), v2: "" }] }] };
+    return null;
   }
   function matchesTrial(p, trial) {
     if (trial.role && !roleMatch(p, trial.role)) return false;
