@@ -69,6 +69,7 @@
     hiManual: {}, // highlights the user set by hand (persist across searches)
     hiAuto: {}, // filter-driven highlights (recomputed fresh on each search)
     appliedFilters: { role: "", type: "", hand: "", country: "" }, // simple filters at last apply
+    manualOrder: false, // true once the user drag-reorders rows (until a sort/search)
     minInnings: { batting: 10, bowling: 10 }, // default for pre_wc; reset on range toggle
     adv: null, // advanced builder: { top:'AND'|'OR', groups:[{conn, conds:[{field,op,v1,v2}]}] }
     advOpen: false, // is the advanced panel expanded?
@@ -233,6 +234,9 @@
 
   // ---- Sorting ------------------------------------------------------------
   function sortRows(rows) {
+    if (cs.manualOrder && !cs.sortKey) {
+      return rows.slice(); // preserve the user's drag order (cs.rows order)
+    }
     if (!cs.sortKey) {
       // default: country, then player first name (alphabetical)
       return rows.slice().sort((a, b) => {
@@ -261,6 +265,7 @@
     });
   }
   function applySort(key) {
+    cs.manualOrder = false; // a column sort replaces any manual drag order
     if (cs.sortKey === key) {
       cs.sortDir = cs.sortDir === "asc" ? "desc" : "asc";
     } else {
@@ -269,6 +274,24 @@
     renderTable();
   }
   window.csApplySort = applySort;
+
+  // Drag-reorder a player row. Reorders the on-screen (displayed) order so the
+  // move matches what the user sees, even if the table was sorted. Rows hidden
+  // by the min-innings filter are preserved (appended) so they aren't lost.
+  function reorderRow(fromId, toId) {
+    const disp = (cs._displayed || cs.rows).slice();
+    const fi = disp.findIndex((p) => p.id === fromId);
+    const ti = disp.findIndex((p) => p.id === toId);
+    if (fi < 0 || ti < 0 || fi === ti) return;
+    const [moved] = disp.splice(fi, 1);
+    disp.splice(ti, 0, moved);
+    const shown = new Set(disp.map((p) => p.id));
+    const hidden = cs.rows.filter((p) => !shown.has(p.id));
+    cs.rows = disp.concat(hidden);
+    cs.manualOrder = true;
+    cs.sortKey = null; // switch to manual order; sort indicator clears
+    renderTable();
+  }
 
   // ---- Show / hide columns menu ------------------------------------------
   function openColMenu() {
@@ -957,6 +980,7 @@
 
   function runFilters() {
     cs.rows = DATA.players.filter((p) => playerMatchesFilters(p) && playerMatchesAdvanced(p));
+    cs.manualOrder = false; // fresh results come back in the normal order
     applyFilterColumnEffects();
     syncAppliedFilters();
     updateSearchPending();
@@ -1228,6 +1252,7 @@
       return typeof v === "number" ? v >= minInn : minInn === 0;
     });
     rows = sortRows(rows);
+    cs._displayed = rows; // the exact on-screen order, used as the basis for drag-reorder
 
     if (!cs.rows.length) {
       table.innerHTML = ""; table.style.display = "none"; empty.style.display = "flex"; return;
@@ -1257,14 +1282,13 @@
     const colRow = `<tr>
       <th class="cs-col-player cs-sortable" data-sortkey="name">Player ${sortInd("name")}</th>
       ${allCols.map((c) => {
-        const tip = c.kind === "stat" && GLOSS[c.key] ? ` data-tip="${GLOSS[c.key].replace(/"/g, "&quot;")}"` : "";
         const hi = hiSet.has(c.key) ? " cs-hi" : "";
         const hiOn = hiSet.has(c.key) ? " on" : "";
         const hover = `<span class="cs-colhover">`
           + `<span class="cs-colh-btn cs-colh-hi${hiOn}" data-act="hi" data-key="${c.key}" data-kind="${c.kind}" title="Highlight column">&#9728;</span>`
           + `<span class="cs-colh-btn cs-colh-x" data-act="hide" data-key="${c.key}" data-kind="${c.kind}" title="Hide column">&#10005;</span>`
           + `</span>`;
-        return `<th class="cs-sortable cs-draggable${hi}" draggable="true" data-sortkey="${c.key}" data-colkey="${c.key}" data-kind="${c.kind}" data-section="${c.section}"${tip}>${c.label} ${sortInd(c.key)}${hover}</th>`;
+        return `<th class="cs-sortable cs-draggable${hi}" draggable="true" data-sortkey="${c.key}" data-colkey="${c.key}" data-kind="${c.kind}" data-section="${c.section}">${c.label} ${sortInd(c.key)}${hover}</th>`;
       }).join("")}
     </tr>`;
 
@@ -1281,7 +1305,7 @@
         return `<td${hi}>${fmt(colVal(p, cc.col), cc.col.dp)}</td>`;
       }).join("");
       return `<tr>
-        <td class="cs-col-player">
+        <td class="cs-col-player cs-rowdrag" draggable="true" data-pid="${p.id}">
           <div class="cs-pl">
             <img class="cs-face" src="${p.photo_url}" onerror="this.style.visibility='hidden'">
             ${flagImg(p)}
@@ -1347,6 +1371,34 @@
           reorderCol(dragKey, targetKey, dragSection);
         }
         dragKey = null; dragSection = null;
+      });
+    });
+    // drag-reorder player rows by grabbing the player cell
+    let dragRowId = null;
+    table.querySelectorAll('td.cs-rowdrag[draggable="true"]').forEach((td) => {
+      const tr = td.closest("tr");
+      td.addEventListener("dragstart", (e) => {
+        dragRowId = td.dataset.pid;
+        e.dataTransfer.effectAllowed = "move";
+        if (tr) tr.classList.add("cs-row-dragging");
+      });
+      td.addEventListener("dragend", () => {
+        table.querySelectorAll(".cs-row-dragging,.cs-row-dragover")
+          .forEach((el) => el.classList.remove("cs-row-dragging", "cs-row-dragover"));
+        dragRowId = null;
+      });
+      td.addEventListener("dragover", (e) => {
+        if (!dragRowId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (tr) tr.classList.add("cs-row-dragover");
+      });
+      td.addEventListener("dragleave", () => { if (tr) tr.classList.remove("cs-row-dragover"); });
+      td.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const targetId = td.dataset.pid;
+        if (dragRowId && targetId && dragRowId !== targetId) reorderRow(dragRowId, targetId);
+        dragRowId = null;
       });
     });
   }

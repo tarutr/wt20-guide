@@ -459,6 +459,10 @@ img{display:block}
 .cs-colh-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;font-size:10px;line-height:1;cursor:pointer;background:var(--panel);border:1px solid var(--border);color:var(--faint)}
 .cs-colh-btn:hover{color:var(--accent);border-color:var(--accent)}
 .cs-colh-hi.on{color:var(--accent);border-color:var(--accent)}
+.cs-table tbody td.cs-rowdrag{cursor:grab}
+.cs-table tbody td.cs-rowdrag:active{cursor:grabbing}
+.cs-table tbody tr.cs-row-dragging{opacity:.45}
+.cs-table tbody tr.cs-row-dragover td{box-shadow:inset 0 2px 0 var(--accent)}
 .cs-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center}
 .cs-empty-h{font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px}
 .cs-empty-p{font-size:13px;color:var(--dim)}
