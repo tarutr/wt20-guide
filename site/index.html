@@ -413,6 +413,10 @@ img{display:block}
 .cs-backdrop.show{display:flex}
 .cs-modal{position:relative;width:min(1180px,96vw);height:min(680px,92vh);background:var(--panel);border:1px solid var(--border);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
 .cs-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border);flex:none}
+.cs-head-l{display:flex;align-items:center;gap:9px}
+.cs-headchev{background:none;border:none;color:var(--faint);font-size:13px;cursor:pointer;padding:4px 6px;flex:none;line-height:1}
+.cs-headchev:hover{color:var(--accent)}
+.cs-toolbar.collapsed{display:none}
 .cs-title{font-size:22px;font-weight:800;color:var(--text)}
 .cs-sub{font-size:12px;color:var(--dim);margin-top:2px}
 .cs-x{width:30px;height:30px;border-radius:50%;background:var(--chip);border:1px solid var(--border);color:var(--dim);font-size:13px;cursor:pointer}
@@ -439,7 +443,7 @@ img{display:block}
 .cs-table th,.cs-table td{white-space:nowrap;text-align:center;padding:0 16px;height:46px;font-size:13px;border-right:1px solid var(--soft,rgba(255,255,255,.05))}
 .cs-table th:last-child,.cs-table td:last-child{border-right:none}
 .cs-table thead th{position:sticky;top:0;background:var(--panel-2);color:var(--faint);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border);z-index:2;user-select:none}
-.cs-table .cs-grouprow th{top:0;height:32px;font-size:10px;letter-spacing:.1em;color:var(--accent);border-bottom:1px solid var(--border);background:var(--panel-2)}
+.cs-table .cs-grouprow th{top:0;height:32px;font-size:10px;letter-spacing:.1em;color:var(--dim);border-bottom:1px solid var(--border);background:var(--panel-2)}
 .cs-table .cs-grouprow th.cs-group{border-left:1px solid var(--border)}
 .cs-table .cs-grouprow th.cs-group-adv{color:var(--dim)}
 .cs-table thead tr:nth-child(2) th{top:32px}
@@ -493,7 +497,7 @@ img{display:block}
 .cs-run{background:var(--accent);color:#fff;border:none;font-family:inherit;font-size:12px;font-weight:700;padding:8px 18px;border-radius:8px;cursor:pointer}
 .cs-run.cs-run-idle{background:none;border:1px solid var(--border);color:var(--dim);font-weight:600}
 .cs-run.cs-run-idle:hover{color:var(--accent);border-color:var(--accent)}
-.cs-sentence{padding:12px 22px 0;font-size:12.5px;font-style:italic;color:var(--dim)}
+.cs-sentence{padding:14px 22px;font-size:12.5px;font-style:italic;color:var(--dim)}
 /* Stage C: footer, menus, sort/drag */
 .cs-foot{flex:none;display:flex;align-items:center;gap:12px;padding:13px 22px;border-top:1px solid var(--border)}
 .cs-foot-btn{background:var(--chip);border:1px solid var(--border);color:var(--dim);font-size:12px;font-weight:600;padding:8px 14px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:7px;position:relative;user-select:none}

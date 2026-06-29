@@ -50,6 +50,12 @@
   };
   const BAT_TYPES = ["Top Order Bat", "Middle Order Bat", "Finisher", "Wicket Keeper"];
   const BAT_TYPE_LABELS = { "Top Order Bat": "Top Order", "Middle Order Bat": "Middle Order", "Finisher": "Finisher", "Wicket Keeper": "Wicket Keeper" };
+  // Nationality -> adjective for the description sentence.
+  const DEMONYMS = {
+    "Australia": "Australian", "Bangladesh": "Bangladeshi", "England": "English", "India": "Indian",
+    "Ireland": "Irish", "Netherlands": "Dutch", "New Zealand": "Kiwi", "Pakistan": "Pakistani",
+    "Scotland": "Scottish", "South Africa": "South African", "Sri Lanka": "Sri Lankan", "West Indies": "West Indian",
+  };
   const BOWL_TYPES = ["Pace", "Off-Spin", "Leg Spin", "Left-Arm Orthodox", "Left-Arm Unorthodox"];
   const COUNTRIES = ["Australia", "Bangladesh", "England", "India", "Ireland", "Netherlands", "New Zealand", "Pakistan", "Scotland", "Sri Lanka", "South Africa", "West Indies"];
 
@@ -784,7 +790,8 @@
     wrap.innerHTML = `
       <div class="cs-modal">
         <div class="cs-head">
-          <div>
+          <div class="cs-head-l">
+            <button class="cs-headchev" id="cs-headchev" title="Collapse / expand search & filters">&#9650;</button>
             <div class="cs-title serif">Compare Stats</div>
           </div>
           <div class="cs-head-r">
@@ -793,10 +800,8 @@
           </div>
         </div>
 
-        <div class="cs-toolbar">
+        <div class="cs-toolbar" id="cs-toolbar">
           <div class="cs-toolrow cs-searchrow" id="cs-searchrow">
-            <button class="cs-chev" id="cs-chev-search" title="Collapse / expand">&#9650;</button>
-            <span class="cs-collabel">Search</span>
             <div class="cs-search">
               <input type="text" id="cs-search-input" placeholder="Search a player to add…" autocomplete="off">
               <div class="cs-results" id="cs-search-results"></div>
@@ -811,8 +816,6 @@
             </div>
           </div>
           <div class="cs-toolrow cs-filterrow" id="cs-filterrow">
-            <button class="cs-chev" id="cs-chev-filter" title="Collapse / expand">&#9650;</button>
-            <span class="cs-collabel">Filters</span>
             <div class="cs-filtergroup">
               <span class="cs-filter-tag">Filters</span>
               <div class="cs-fdrop" id="cs-f-role"><span class="cs-fl">Role</span> <span class="cs-fv">All</span> <span class="cs-ca">&#9660;</span></div>
@@ -912,9 +915,8 @@
     ensureAdv();
     renderAdvPanel();
     updateSearchPending();
-    // row chevrons (collapse each row independently)
-    wrap.querySelector("#cs-chev-search").addEventListener("click", () => toggleRow("search"));
-    wrap.querySelector("#cs-chev-filter").addEventListener("click", () => toggleRow("filter"));
+    // single chevron by the title collapses/expands the whole search+filter toolbar
+    wrap.querySelector("#cs-headchev").addEventListener("click", toggleToolbar);
     // search
     const si = wrap.querySelector("#cs-search-input");
     si.addEventListener("input", onSearchInput);
@@ -962,12 +964,12 @@
     renderTable();
   }
 
-  function toggleRow(which) {
-    const row = document.getElementById(which === "search" ? "cs-searchrow" : "cs-filterrow");
-    const chev = document.getElementById(which === "search" ? "cs-chev-search" : "cs-chev-filter");
-    if (!row) return;
-    const collapsed = row.classList.toggle("collapsed");
-    chev.innerHTML = collapsed ? "&#9660;" : "&#9650;";
+  function toggleToolbar() {
+    const tb = document.getElementById("cs-toolbar");
+    const chev = document.getElementById("cs-headchev");
+    if (!tb) return;
+    const collapsed = tb.classList.toggle("collapsed");
+    chev.innerHTML = collapsed ? "&#9660;" : "&#9650;"; // ▼ collapsed (click to expand) / ▲ expanded
   }
 
   // ---- Filters ------------------------------------------------------------
@@ -1328,29 +1330,30 @@
   };
 
   // ---- Render table -------------------------------------------------------
-  // Build an italicised sentence describing the active filter set.
-  function filterSentence() {
+  // Build an italicised sentence describing the active filter set + player count.
+  // e.g. "Batting Stats for Indian All-Rounders (RHB) where NBSR < 63.6. Player count = 7."
+  function filterSentence(count) {
     const f = cs.filters;
-    const subjects = [];
-    if (f.role) subjects.push(f.role + "s");
-    if (f.type) {
-      const t = cs.discipline === "batting" ? (BAT_TYPE_LABELS[f.type] || f.type) : f.type;
-      subjects.push(f.role ? `(${t})` : t + (cs.discipline === "batting" ? " batters" : " bowlers"));
-    }
-    if (f.hand) {
-      const h = f.hand === "LHB" ? "left-hand" : "right-hand";
-      subjects.push(cs.discipline === "batting" ? h + " bats" : h + " bowlers");
-    }
-    // If no role/type/hand, default subject is "players"
-    let subject = subjects.length ? subjects.join(", ") : "players";
-    if (f.country) subject += " from " + f.country;
-    const hasSimple = subjects.length || f.country;
-    const adv = advClause();
-    if (!hasSimple && !adv) return "";
     const disc = cs.discipline === "batting" ? "Batting" : "Bowling";
-    let s = `${disc} stats for ${subject}`;
+    const adv = advClause();
+    const hasAny = f.role || f.type || f.hand || f.country || adv;
+    let subject;
+    if (!hasAny) {
+      subject = "all players";
+    } else {
+      let base = f.role ? (f.role + "s") : "players";
+      const quals = [];
+      if (f.type) quals.push(cs.discipline === "batting" ? (BAT_TYPE_LABELS[f.type] || f.type) : f.type);
+      if (f.hand) {
+        if (cs.discipline === "batting") quals.push(f.hand); // RHB / LHB
+        else quals.push(f.hand === "LHB" ? "left-arm" : "right-arm");
+      }
+      subject = quals.length ? `${base} (${quals.join(", ")})` : base;
+      if (f.country) subject = (DEMONYMS[f.country] || f.country) + " " + subject;
+    }
+    let s = `${disc} Stats for ${subject}`;
     if (adv) s += ` where ${adv}`;
-    return s + ".";
+    return `${s}. Player count = ${count}.`;
   }
 
   function renderTable() {
@@ -1360,14 +1363,7 @@
     if (!table) return;
     ensureColState();
 
-    // active-filter sentence
-    if (sent) {
-      const txt = cs.rows.length ? filterSentence() : "";
-      sent.textContent = txt;
-      sent.style.display = txt ? "block" : "none";
-    }
-
-    // apply min-innings filter to the displayed rows
+    // apply min-innings filter to get the rows actually displayed
     const minInn = cs.minInnings[cs.discipline] || 0;
     const ik = inningsKey();
     let rows = cs.rows.filter((p) => {
@@ -1376,6 +1372,15 @@
     });
     rows = sortRows(rows);
     cs._displayed = rows; // the exact on-screen order, used as the basis for drag-reorder
+
+    // active-filter sentence: shown whenever there are results OR active filters;
+    // the count reflects the rows actually displayed.
+    if (sent) {
+      const hasFilters = cs.filters.role || cs.filters.type || cs.filters.hand || cs.filters.country || advCount() > 0;
+      const show = cs.rows.length > 0 || hasFilters;
+      sent.textContent = show ? filterSentence(rows.length) : "";
+      sent.style.display = show ? "block" : "none";
+    }
 
     if (!cs.rows.length) {
       table.innerHTML = ""; table.style.display = "none"; empty.style.display = "flex"; return;
@@ -1389,7 +1394,7 @@
 
     // group header row (hide a group if it has no visible columns)
     let groupRow = `<tr class="cs-grouprow"><th class="cs-col-player"></th>`;
-    if (attrCols.length) groupRow += `<th class="cs-group cs-group-attr" colspan="${attrCols.length}"></th>`;
+    if (attrCols.length) groupRow += `<th class="cs-group cs-group-attr" colspan="${attrCols.length}">Attributes</th>`;
     if (basicCols.length) groupRow += `<th class="cs-group" colspan="${basicCols.length}">Basic Stats</th>`;
     if (advCols.length) groupRow += `<th class="cs-group cs-group-adv" colspan="${advCols.length}">Advanced Stats</th>`;
     groupRow += `</tr>`;
