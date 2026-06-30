@@ -496,6 +496,25 @@
   function freshAdv() { return { top: "AND", groups: [newAdvGroup()] }; }
   function ensureAdv() { if (!cs.adv) cs.adv = freshAdv(); }
 
+  // ---- Simple ⇄ Advanced binding -----------------------------------------
+  // The simple Role/Type/Hand/Country dropdowns are mirrored into cs.adv as
+  // tagged, always-AND single-condition groups, so cs.adv is the COMPLETE
+  // filter set (the graph reads cs.adv alone). User-built groups are preserved
+  // and continue to obey the AND/OR top connector; the mirrored groups never do
+  // (they always constrain), so results are identical to the old simple-AND-advanced.
+  const SIMPLE_DIMS = ["role", "type", "hand", "country"];
+  const DIM_FIELD = { role: "__role", type: "__type", hand: "__hand", country: "__country" };
+  function syncAdvFromSimple() {
+    ensureAdv();
+    const user = cs.adv.groups.filter((g) => !g._simple);
+    const tagged = [];
+    SIMPLE_DIMS.forEach((dim) => {
+      const v = cs.filters[dim];
+      if (v) tagged.push({ conn: "AND", _simple: dim, conds: [{ field: DIM_FIELD[dim], op: "is", v1: v, v2: "" }] });
+    });
+    cs.adv.groups = tagged.concat(user.length ? user : [newAdvGroup()]);
+  }
+
   // Selectable fields = Age + categorical attributes (Role/Type/Hand/Country) +
   // the current discipline's stat columns.
   function advFields() {
@@ -559,11 +578,17 @@
     if (!cc.length) return true; // inactive group doesn't constrain
     return g.conn === "OR" ? cc.some((c) => condEval(p, c)) : cc.every((c) => condEval(p, c));
   }
-  function advActiveGroups() {
+  function advActiveGroups() {   // user-built groups only (excludes mirrored simple filters)
     ensureAdv();
-    return cs.adv.groups.filter((g) => groupActiveConds(g).length > 0);
+    return cs.adv.groups.filter((g) => !g._simple && groupActiveConds(g).length > 0);
+  }
+  function advSimpleGroups() {    // mirrored simple-filter groups — always AND-ed
+    ensureAdv();
+    return cs.adv.groups.filter((g) => g._simple && groupActiveConds(g).length > 0);
   }
   function playerMatchesAdvanced(p) {
+    // mirrored simple filters always constrain, regardless of the top connector
+    for (const g of advSimpleGroups()) { if (!groupEval(p, g)) return false; }
     const ag = advActiveGroups();
     if (!ag.length) return true;
     return cs.adv.top === "OR" ? ag.some((g) => groupEval(p, g)) : ag.every((g) => groupEval(p, g));
@@ -668,14 +693,48 @@
     return `<input class="cs-cval" data-role="v1" type="number" inputmode="decimal" value="${c.v1}" placeholder="value">`;
   }
 
+  function simpleFiltersBlockHTML() {
+    const labelFor = (d) => d === "hand" ? (cs.discipline === "batting" ? "Bat Hand" : "Bowl Hand")
+      : d === "role" ? "Role" : d === "type" ? "Type" : "Country";
+    const active = SIMPLE_DIMS.filter((d) => cs.filters[d]);
+    const rows = active.map((d) => {
+      const opts = filterOptions(d);
+      const sel = opts.map((o) => `<option value="${o.v}" ${cs.filters[d] === o.v ? "selected" : ""}>${o.label}</option>`).join("");
+      return `<div class="cs-simrow" data-dim="${d}">
+          <span class="cs-simlab">${labelFor(d)}</span><span class="cs-simis">is</span>
+          <select class="cs-csel cs-simsel" data-dim="${d}">${sel}</select>
+          <button class="cs-cond-x" data-role="rmsimple" data-dim="${d}" title="Remove filter">&#10005;</button>
+        </div>`;
+    }).join("");
+    const body = active.length ? rows
+      : `<div class="cs-simhint">None set — use the Role / Type / Bat Hand / Country dropdowns, or add conditions below.</div>`;
+    return `<div class="cs-simblock">
+        <div class="cs-simhead">Your filters <span class="cs-simnote">always applied</span></div>
+        ${body}
+      </div>`;
+  }
+  function wireSimpleBlock() {
+    const panel = document.getElementById("cs-advpanel");
+    if (!panel) return;
+    panel.querySelectorAll(".cs-simsel").forEach((sel) => sel.addEventListener("change", (e) => {
+      cs.filters[e.target.dataset.dim] = e.target.value;
+      syncAdvFromSimple(); updateFilterLabels(); updateSearchPending(); renderAdvPanel();
+    }));
+    panel.querySelectorAll('[data-role="rmsimple"]').forEach((b) => b.addEventListener("click", () => {
+      cs.filters[b.dataset.dim] = "";
+      syncAdvFromSimple(); updateFilterLabels(); updateSearchPending(); renderAdvPanel();
+    }));
+  }
+
   function renderAdvPanel() {
     const panel = document.getElementById("cs-advpanel");
     if (!panel) return;
     ensureAdv();
-    const groups = cs.adv.groups;
-    let html = "";
-    groups.forEach((g, gi) => {
-      if (gi > 0) {
+    let html = simpleFiltersBlockHTML();
+    const userGroups = cs.adv.groups.map((g, gi) => ({ g, gi })).filter((x) => !x.g._simple);
+    userGroups.forEach((x, idx) => {
+      const g = x.g, gi = x.gi;
+      if (idx > 0) {
         html += `<div class="cs-grpconn"><span class="cs-conn-pill" data-role="top">${cs.adv.top}</span></div>`;
       }
       html += `<div class="cs-grp" data-gi="${gi}">
@@ -686,7 +745,7 @@
             <button data-conn="OR" class="${g.conn === "OR" ? "on" : ""}">Any</button>
           </span>
           <span class="gl">of:</span>
-          ${groups.length > 1 ? `<button class="cs-grp-x" data-role="rmgrp" title="Remove group">&#10005;</button>` : ""}
+          ${userGroups.length > 1 ? `<button class="cs-grp-x" data-role="rmgrp" title="Remove group">&#10005;</button>` : ""}
         </div>
         ${g.conds.map((c, ci) => `
           <div class="cs-cond" data-ci="${ci}">
@@ -700,6 +759,7 @@
     });
     html += `<button class="cs-addbtn cs-addgrp" data-role="addgrp">+ Add group (OR / AND another set)</button>`;
     panel.innerHTML = html;
+    wireSimpleBlock();
     wireAdvPanel();
     updateAdvToggle();
   }
@@ -910,7 +970,7 @@
     wrap.querySelector("#cs-advtoggle").addEventListener("click", openAdvPopup);
     wrap.querySelector("#cs-advclose").addEventListener("click", closeAdvPopup);
     wrap.querySelector("#cs-advsearch").addEventListener("click", () => { runFilters(); closeAdvPopup(); });
-    wrap.querySelector("#cs-advclear").addEventListener("click", () => { cs.adv = freshAdv(); renderAdvPanel(); });
+    wrap.querySelector("#cs-advclear").addEventListener("click", () => { cs.adv = freshAdv(); syncAdvFromSimple(); renderAdvPanel(); });
     wrap.querySelector("#cs-advback").addEventListener("click", (e) => { if (e.target.id === "cs-advback") closeAdvPopup(); });
     ensureAdv();
     renderAdvPanel();
@@ -946,6 +1006,7 @@
     cs.filters.type = ""; cs.filters.hand = "";
     cs.sortKey = null;
     cs.adv = freshAdv();
+    syncAdvFromSimple();
     ensureColState();
     updateFilterLabels();
     syncAppliedFilters();
@@ -1020,8 +1081,10 @@
       it.addEventListener("click", (e) => {
         e.stopPropagation();
         cs.filters[which] = it.dataset.v;
+        syncAdvFromSimple();
         updateFilterLabels();
         updateSearchPending();
+        if (cs.advOpen) renderAdvPanel();
         closeFilterMenu();
       });
     });
@@ -1099,6 +1162,7 @@
   }
 
   function runFilters() {
+    syncAdvFromSimple(); // advanced model mirrors the simple dropdowns before filtering
     cs.rows = DATA.players.filter((p) => playerMatchesFilters(p) && playerMatchesAdvanced(p));
     cs.manualOrder = false; // fresh results come back in the normal order
     applyFilterColumnEffects();
@@ -1323,6 +1387,7 @@
     resetColsForCurrentDiscipline();
     cs.sortKey = null; cs.sortDir = "desc";
     cs.adv = freshAdv();
+    syncAdvFromSimple();
     syncAppliedFilters();
     updateSearchPending();
     renderAdvPanel();
