@@ -42,6 +42,15 @@
     { key: "econ_edge", label: "Econ Edge", group: "advanced", dp: 2 },
   ];
 
+  // Fields where the data pipeline stores a genuine zero count as `null` instead of `0`
+  // (confirmed against real data: fifties_plus/three_wicket_hauls are null 100% of the
+  // time the count is zero — even for players with 30+ innings — a backend
+  // COUNT-via-join quirk, not a "no data" case). Treated as 0 everywhere these are
+  // read (table display + advanced filters), while every other null (genuine
+  // no-attempts / undefined-rate cases like Bowl SR or Balls/Bdry) still correctly
+  // excludes from filters and displays as "—".
+  const ZERO_NOT_NULL_FIELDS = new Set(["fifties_plus", "three_wicket_hauls"]);
+
   // ---- Filter option definitions -----------------------------------------
   const ROLE_GROUPS = {
     Batter: ["Top Order Bat", "Middle Order Bat", "Finisher", "Wicket Keeper"],
@@ -74,7 +83,7 @@
     hi: {}, // { batting: Set(effective highlighted keys), bowling: Set(...) } = manual ∪ auto
     hiManual: {}, // highlights the user set by hand (persist across searches)
     hiAuto: {}, // filter-driven highlights (recomputed fresh on each search)
-    appliedFilters: { role: "", type: "", hand: "", country: "" }, // simple filters at last apply
+    appliedFilters: { role: "", type: "", hand: "", country: "", range: "pre_wc" }, // simple filters + range at last apply
     manualOrder: false, // true once the user drag-reorders rows (until a sort/search)
     minInnings: { batting: 10, bowling: 10 }, // default for pre_wc; reset on range toggle
     adv: null, // advanced builder: { top:'AND'|'OR', groups:[{conn, conds:[{field,op,v1,v2}]}] }
@@ -127,9 +136,11 @@
     return cs.range === "wc" ? player.wc_stats : player.pre_wc_stats;
   }
   function colVal(player, col) {
-    if (col.src === "graph") return (player.graph_data || {})[col.key];
-    const s = statsFor(player) || {};
-    return s[col.key];
+    let v;
+    if (col.src === "graph") v = (player.graph_data || {})[col.key];
+    else v = (statsFor(player) || {})[col.key];
+    if (v == null && ZERO_NOT_NULL_FIELDS.has(col.key)) return 0;
+    return v;
   }
   function pal(player) {
     return TEAM_COLORS[slug(player.nationality)] || { p: "#E4324B", s: "#15233F" };
@@ -529,12 +540,33 @@
     return [{ key: "__age", label: "Age", dp: 0, age: true }, ...cats, ...stats];
   }
   function advFieldByKey(k) { return advFields().find((f) => f.key === k) || null; }
+  // The metric keys actually referenced in the user's active advanced filter conditions
+  // (excludes categorical/age fields and the mirrored simple-filter groups) — used to default
+  // the graph's chosen metrics to whatever the user is actually filtering on, instead of a
+  // generic column-highlight fallback.
+  function advMetricKeys() {
+    const keys = [];
+    advActiveGroups().forEach((g) => {
+      groupActiveConds(g).forEach((c) => {
+        const f = advFieldByKey(c.field);
+        if (f && !f.cat && !f.age) keys.push(c.field);
+      });
+    });
+    return [...new Set(keys)];
+  }
+  // Fields where the data pipeline stores a genuine zero count as `null` instead of `0`
+  // (confirmed: fifties_plus/three_wicket_hauls are null 100% of the time the count is
+  // zero, even for players with 30+ innings — a backend COUNT-via-join quirk, not a
+  // "no data" case). Treated as 0 here so "< 3 fifties" correctly includes zero-fifty
+  // players, while every other null (genuine no-attempts / undefined-rate cases like
+  // Bowl SR or Balls/Bdry) still correctly excludes from all conditions.
   function advFieldVal(p, field) {
     if (!field || field.cat) return null;
     if (field.age) return typeof p.age === "number" ? p.age : null;
     let v;
     if (field.src === "graph") v = (p.graph_data || {})[field.key];
     else v = (statsFor(p) || {})[field.key];
+    if (v == null && ZERO_NOT_NULL_FIELDS.has(field.key)) return 0;
     return typeof v === "number" && !Number.isNaN(v) ? v : null;
   }
   // Does player p's attribute (dim) equal value? Mirrors the simple-filter logic.
@@ -840,13 +872,135 @@
     });
   }
 
+  // ---- CSV export ----------------------------------------------------------
+  // Mirrors exactly what's on screen: same visible columns (attrs + stats, in
+  // the user's current show/hide + drag order), same rows (post-filter,
+  // post-Min-Innings, post-sort/manual-reorder), same discipline/range.
+  function downloadCSV() {
+    const attrCols = visibleAttrCols();
+    const statCols = visibleStatCols();
+    const rows = (cs._displayed && cs._displayed.length) ? cs._displayed : cs.rows;
+    const esc = (v) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = ["Player", "Country", ...attrCols.map((a) => a.label), ...statCols.map((c) => c.label)];
+    const lines = [header.map(esc).join(",")];
+    rows.forEach((p) => {
+      const cells = [
+        p.name,
+        p.nationality || "",
+        ...attrCols.map((a) => a.get(p)),
+        ...statCols.map((c) => { const v = colVal(p, c); return v == null || Number.isNaN(v) ? "" : v; }),
+      ];
+      lines.push(cells.map(esc).join(","));
+    });
+    const csv = lines.join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const discLabel = cs.discipline === "batting" ? "batting" : "bowling";
+    const rangeLabel = cs.range === "wc" ? "wc" : "since_last_wc";
+    a.download = `compare_stats_${discLabel}_${rangeLabel}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    if (window.track) track("compare_stats_download_csv", { count: rows.length, discipline: cs.discipline });
+  }
+
+  // ---- Graph view (gated second tab; embeds graph.html in an iframe) ------
+  // Compare Stats owns the filter; the graph reads the resulting player set,
+  // discipline/range, and highlighted/sorted columns (which seed its default
+  // metrics + chart type). The graph's "Advanced filters" button calls back to
+  // open the one shared advanced popup.
+  cs.graphReady = false;
+  cs.graphOpen = false;
+  // Relay theme switches to the embedded graph iframe while it's open — wraps the
+  // page's existing setTheme() (defined earlier in index.html) rather than duplicating
+  // its logic; safe because compare-stats.js always loads after that inline script.
+  (function relayThemeToGraph() {
+    const orig = window.setTheme;
+    if (typeof orig !== "function") return;
+    window.setTheme = function (t) {
+      orig(t);
+      if (cs.graphOpen) { const w = graphFrameWin(); if (w) w.postMessage({ type: "cs-theme", theme: t }, "*"); }
+    };
+  })();
+  function graphFrameWin() { const f = document.getElementById("cs-graphframe"); return f && f.contentWindow; }
+  function graphPlayerIds() {
+    const list = (cs._displayed && cs._displayed.length) ? cs._displayed : cs.rows;
+    return (list || []).map((p) => p.id);
+  }
+  function buildGraphInit() {
+    const d = cs.discipline;
+    const order = activeCols().map((c) => c.key);   // current discipline's stat columns, in order
+    const hiSet = cs.hi[d] || new Set();
+    const highlight = order.filter((k) => hiSet.has(k));        // highlighted STAT columns only, in column order
+    const sortKey = (cs.sortKey && order.includes(cs.sortKey)) ? cs.sortKey : null;
+    return { type: "cs-init", discipline: d, range: cs.range === "wc" ? "wc" : "pre", playerIds: graphPlayerIds(), highlight, advMetricKeys: advMetricKeys(), sortKey, sentence: filterSentence(graphPlayerIds().length, true), sentenceParts: sentenceParts(), theme: document.documentElement.getAttribute("data-theme") || "dark" };
+  }
+  function sendGraphInit() { const w = graphFrameWin(); if (w) w.postMessage(buildGraphInit(), "*"); }
+  function openGraphView() {
+    const view = document.getElementById("cs-graphview");
+    const frame = document.getElementById("cs-graphframe");
+    if (!view || !frame) return;
+    if (!frame.getAttribute("src")) frame.setAttribute("src", "graph.html"); // lazy first load
+    cs.graphOpen = true;
+    view.classList.add("show");
+    const sub = document.getElementById("cs-graphsub");
+    if (sub) sub.textContent = graphPlayerIds().length + " players from your filters";
+    if (cs.graphReady) sendGraphInit();   // otherwise the ready handshake sends it
+  }
+  function closeGraphView() {
+    cs.graphOpen = false;
+    const view = document.getElementById("cs-graphview");
+    if (view) view.classList.remove("show");
+  }
+  function graphAddHighlights(disc, keys) {
+    if (disc !== "batting" && disc !== "bowling") return;
+    const COLS = disc === "batting" ? BAT_COLS : BOWL_COLS;
+    if (!cs.hidden[disc]) cs.hidden[disc] = new Set(COLS.filter((c) => c.group === "advanced").map((c) => c.key));
+    if (!cs.order[disc]) cs.order[disc] = COLS.map((c) => c.key);
+    if (!cs.hiManual[disc]) cs.hiManual[disc] = new Set();
+    if (!cs.hiAuto[disc]) cs.hiAuto[disc] = new Set();
+    if (!cs.hi[disc]) cs.hi[disc] = new Set();
+    const valid = new Set(COLS.map((c) => c.key));
+    (keys || []).forEach((k) => { if (valid.has(k)) { cs.hidden[disc].delete(k); cs.hiManual[disc].add(k); } });
+    recomputeHi(disc);
+    if (disc === cs.discipline) renderTable();   // reflect immediately when back on this discipline
+  }
+  // messages from the embedded graph
+  window.addEventListener("message", (e) => {
+    const m = e.data; if (!m || typeof m !== "object") return;
+    if (m.type === "cs-graph-ready") { cs.graphReady = true; if (cs.graphOpen) sendGraphInit(); }
+    else if (m.type === "cs-openAdvanced") {
+      if (m.discipline && m.discipline !== cs.discipline) switchDiscipline(m.discipline);
+      const r = m.range === "wc" ? "wc" : "pre_wc";
+      if (r !== cs.range) switchRange(r);
+      openAdvPopup();
+    }
+    else if (m.type === "cs-metrics") graphAddHighlights(m.discipline, m.keys);
+  });
+
   // ---- Build the modal once ----------------------------------------------
   function buildModal() {
     if (document.getElementById("cs-backdrop")) return;
     const wrap = document.createElement("div");
     wrap.id = "cs-backdrop";
     wrap.className = "cs-backdrop";
-    wrap.addEventListener("click", (e) => { if (e.target === wrap) closeCompareStats(); });
+    wrap.addEventListener("click", (e) => {
+      if (e.target !== wrap) return;
+      if (cs.graphOpen) {
+        const win = graphFrameWin();
+        if (win && typeof win.csAnyDropdownOpen === "function" && win.csAnyDropdownOpen()) {
+          win.csCloseDropdowns();
+          return;
+        }
+      }
+      closeCompareStats();
+    });
     wrap.innerHTML = `
       <div class="cs-modal">
         <div class="cs-head">
@@ -913,6 +1067,8 @@
             <span class="cs-mininn-lab">Min Innings</span>
             <div class="cs-foot-btn" id="cs-mininnbtn"><span id="cs-mininn-val">10</span> <span class="cs-ca">&#9660;</span></div>
           </div>
+          <button class="cs-foot-btn" id="cs-csvbtn" title="Download this table as a CSV">Download CSV</button>
+          <button class="cs-graph-btn" id="cs-graphbtn" title="Build a shareable graph from these players">Graph</button>
         </div>
 
         <div class="cs-advback" id="cs-advback">
@@ -943,6 +1099,15 @@
             </div>
           </div>
         </div>
+
+        <div class="cs-graphview" id="cs-graphview">
+          <div class="cs-graphview-head">
+            <button class="cs-graphback" id="cs-graphback">&#8592; Compare Stats</button>
+            <div class="cs-graphview-title">Graph builder</div>
+            <div class="cs-graphview-sub" id="cs-graphsub"></div>
+          </div>
+          <iframe class="cs-graphframe" id="cs-graphframe" title="Graph builder"></iframe>
+        </div>
       </div>`;
     document.body.appendChild(wrap);
 
@@ -966,6 +1131,10 @@
     // run button + randomise
     wrap.querySelector("#cs-run").addEventListener("click", runFilters);
     wrap.querySelector("#cs-rand").addEventListener("click", randomise);
+    // graph view (gated second tab)
+    wrap.querySelector("#cs-csvbtn").addEventListener("click", downloadCSV);
+    wrap.querySelector("#cs-graphbtn").addEventListener("click", openGraphView);
+    wrap.querySelector("#cs-graphback").addEventListener("click", closeGraphView);
     // advanced filters popup
     wrap.querySelector("#cs-advtoggle").addEventListener("click", openAdvPopup);
     wrap.querySelector("#cs-advclose").addEventListener("click", closeAdvPopup);
@@ -1016,12 +1185,15 @@
     renderTable();
   }
   // Switch WC / Since-Last-WC range. Conditions are preserved (same stat fields,
-  // different values), so the advanced builder is untouched.
+  // different values), so the advanced builder is untouched. Since this can change
+  // who qualifies (age/innings/stat thresholds differ per range), it flags Search
+  // as pending rather than silently re-displaying the same row set.
   function switchRange(range) {
     if (cs.range === range) return;
     cs.range = range;
     setRangeSeg(range);
     updateMinInningsDefault();
+    updateSearchPending();
     renderTable();
   }
 
@@ -1148,13 +1320,13 @@
     recomputeHi(d);        // effective = manual ∪ auto
   }
 
-  // ---- Search "pending" cue (simple filters changed but not yet applied) ----
+  // ---- Search "pending" cue (simple filters / range changed but not yet applied) ----
   function filtersChanged() {
     const a = cs.appliedFilters, f = cs.filters;
-    return a.role !== f.role || a.type !== f.type || a.hand !== f.hand || a.country !== f.country;
+    return a.role !== f.role || a.type !== f.type || a.hand !== f.hand || a.country !== f.country || a.range !== cs.range;
   }
   function syncAppliedFilters() {
-    cs.appliedFilters = { role: cs.filters.role, type: cs.filters.type, hand: cs.filters.hand, country: cs.filters.country };
+    cs.appliedFilters = { role: cs.filters.role, type: cs.filters.type, hand: cs.filters.hand, country: cs.filters.country, range: cs.range };
   }
   function updateSearchPending() {
     const btn = document.getElementById("cs-run");
@@ -1169,6 +1341,7 @@
     syncAppliedFilters();
     updateSearchPending();
     renderTable();
+    if (cs.graphOpen) { const w = graphFrameWin(); if (w) w.postMessage({ type: "cs-filtered", playerIds: graphPlayerIds(), discipline: cs.discipline, range: cs.range === "wc" ? "wc" : "pre", advMetricKeys: advMetricKeys(), sentence: filterSentence(graphPlayerIds().length, true), sentenceParts: sentenceParts() }, "*"); }
     if (window.track) track("compare_stats_run_filters", {
       role: cs.filters.role || "all", type: cs.filters.type || "all",
       hand: cs.filters.hand || "all", country: cs.filters.country || "all",
@@ -1200,13 +1373,14 @@
     updateFilterLabels();
     updateMinInningsDefault(); // reset min innings to the pre_wc default (10)
     cs.filters = { role: "", type: "", hand: "", country: "" };
-    // Bias order toward interesting dimensions first, hand last.
+    // Exactly one simple (attribute) filter — paired with the one advanced stat
+    // condition below. Several stacked attribute filters just narrow the population
+    // demographically without saying anything about performance; one attribute +
+    // one stat condition is a more interesting combination.
     const dimsOrder = ["type", "role", "country", "hand"];
     let best = null;
     for (let attempt = 0; attempt < 80; attempt++) {
-      // choose how many filters this attempt uses: 2, 3, or 4 (weighted toward 2-3)
-      const nFilters = pick([2, 2, 2, 3, 3, 4]);
-      const chosen = shuffle(dimsOrder).slice(0, nFilters);
+      const chosen = shuffle(dimsOrder).slice(0, 1);
       const trial = { role: "", type: "", hand: "", country: "" };
       let ok = true;
       for (const dim of chosen) {
@@ -1228,8 +1402,8 @@
       if (count >= MIN && count <= 60 && !best) best = trial;   // fallback: any combo with >=5
     }
     if (!best) {
-      // fallback that still uses two filters: a country + a common role
-      best = { role: "Batter", type: "", hand: "", country: pick(COUNTRIES) };
+      // fallback: a single country filter (reliably yields a healthy pool)
+      best = { role: "", type: "", hand: "", country: pick(COUNTRIES) };
     }
     cs.filters = best;
     updateFilterLabels();
@@ -1258,17 +1432,23 @@
     if (cands.length < 5) return null;
     const shuffle = (arr) => arr.map((v) => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
     for (const col of shuffle(activeCols().slice())) {
-      const field = { key: col.key, dp: col.dp || 0, src: col.src || null, label: col.label };
+      const field = { key: col.key, dp: col.dp || 0, src: col.src || null, label: col.label, lower: !!col.lower };
       const vals = cands.map((p) => advFieldVal(p, field)).filter((v) => typeof v === "number").sort((a, b) => a - b);
       if (vals.length < 5) continue;
-      const gt = Math.random() < 0.5;
+      // Roll "best" or "worst", then map to an operator using the metric's known
+      // direction (col.lower = lower values are better, e.g. Economy, Bowl SR).
+      // A bare coin-flip on the operator would sometimes land on e.g. "highest
+      // bowling strike rate" — technically valid, but a meaningless cut since it
+      // just surfaces the worst wicket-takers with no sense that that's what it is.
+      const wantBest = Math.random() < 0.5;
+      const gt = field.lower ? !wantBest : wantBest;
       const dp = field.dp || 0;
       const step = dp > 0 ? 1 / Math.pow(10, dp) : 1;
       const survivorsFor = (t) => cands.filter((p) => {
         const v = advFieldVal(p, field);
         return typeof v === "number" && (gt ? v > t : v < t);
       }).length;
-      const keepFrac = 0.4 + Math.random() * 0.3; // aim to keep ~40-70%
+      const keepFrac = 0.10 + Math.random() * 0.15; // aim to keep ~10-25% — a standout cut, not a broad slice
       let thr, guard = 0;
       if (gt) {
         let idx = Math.min(Math.floor((1 - keepFrac) * vals.length), vals.length - 5);
@@ -1397,27 +1577,90 @@
   // ---- Render table -------------------------------------------------------
   // Build an italicised sentence describing the active filter set + player count.
   // e.g. "Batting Stats for Indian All-Rounders (RHB) where NBSR < 63.6. Player count = 7."
-  function filterSentence(count) {
-    const f = cs.filters;
-    const disc = cs.discipline === "batting" ? "Batting" : "Bowling";
-    const adv = advClause();
+  // omitCount=true drops the trailing "Player count = N." clause — used for the graph's
+  // footer text, which shows the chart itself so the count is redundant there.
+  // Categorical 'is' advanced conditions (role/type/hand/country), one per dimension, drawn
+  // only from AND-connected groups — these read naturally as part of the subject ("Indian
+  // players"), same as the simple filter dropdowns, so there's no reason to also spell them
+  // out as a raw "Country is India" clause in brackets. Simple-filter dropdowns take
+  // precedence if both happen to be set for the same dimension.
+  function categoricalAdvValues() {
+    const out = {}, used = new Set();
+    advActiveGroups().forEach((g) => {
+      if (g.conn === "OR") return; // an OR'd category isn't a single describable subject
+      groupActiveConds(g).forEach((c) => {
+        const f = advFieldByKey(c.field);
+        if (!f || !f.cat || c.op === "isnot") return;
+        if (used.has(f.dim)) return; // more than one condition on the same dimension — ambiguous, leave both bracketed
+        out[f.dim] = c.v1; used.add(f.dim);
+      });
+    });
+    // second pass: drop any dimension that ended up referenced more than once across groups
+    const counts = {};
+    advActiveGroups().forEach((g) => { if (g.conn === "OR") return; groupActiveConds(g).forEach((c) => { const f = advFieldByKey(c.field); if (f && f.cat && c.op !== "isnot") counts[f.dim] = (counts[f.dim] || 0) + 1; }); });
+    Object.keys(out).forEach((dim) => { if (counts[dim] > 1) delete out[dim]; });
+    return out;
+  }
+  // advClause(), but excluding whichever categorical conditions categoricalAdvValues()
+  // already absorbed into the subject — only genuine numeric/comparison conditions (plus
+  // any OR'd or "is not" categorical ones) remain bracketed.
+  function advClauseExcluding(absorbedDims) {
+    const ag = advActiveGroups();
+    if (!ag.length) return "";
+    const multi = ag.length > 1;
+    const parts = ag.map((g) => {
+      const cc = groupActiveConds(g).filter((c) => {
+        const f = advFieldByKey(c.field);
+        return !(f && f.cat && f.dim && absorbedDims.has(f.dim) && g.conn !== "OR" && c.op !== "isnot");
+      });
+      if (!cc.length) return "";
+      const joiner = g.conn === "OR" ? " OR " : " AND ";
+      const inner = cc.map(condPhrase).join(joiner);
+      return multi && cc.length > 1 ? `(${inner})` : inner;
+    }).filter(Boolean);
+    return parts.join(cs.adv.top === "OR" ? " OR " : " AND ");
+  }
+  // Subject + advanced-condition clause + range, as structured parts — shared by the Compare
+  // Stats table's own sentence and the graph's metric-led description (item #8).
+  function sentenceParts() {
+    const catAdv = categoricalAdvValues();
+    const f = {
+      role: cs.filters.role || catAdv.role || "",
+      type: cs.filters.type || catAdv.type || "",
+      hand: cs.filters.hand || catAdv.hand || "",
+      country: cs.filters.country || catAdv.country || "",
+    };
+    const adv = advClauseExcluding(new Set(Object.keys(catAdv)));
     const hasAny = f.role || f.type || f.hand || f.country || adv;
     let subject;
     if (!hasAny) {
       subject = "all players";
     } else {
-      let base = f.role ? (f.role + "s") : "players";
+      const BAT_TYPE_SUBJECT = { "Wicket Keeper": "Wicket Keepers", "Finisher": "Finishers", "Top Order Bat": "Top-order batters", "Middle Order Bat": "Middle-order batters" };
+      let base;
+      if (f.type) {
+        base = cs.discipline === "batting"
+          ? (BAT_TYPE_SUBJECT[f.type] || ((BAT_TYPE_LABELS[f.type] || f.type) + "s"))
+          : (f.type + " bowlers");
+      } else {
+        base = f.role ? (f.role + "s") : "players";
+      }
       const quals = [];
-      if (f.type) quals.push(cs.discipline === "batting" ? (BAT_TYPE_LABELS[f.type] || f.type) : f.type);
       if (f.hand) {
-        if (cs.discipline === "batting") quals.push(f.hand); // RHB / LHB
+        if (cs.discipline === "batting") quals.push(f.hand);
         else quals.push(f.hand === "LHB" ? "left-arm" : "right-arm");
       }
       subject = quals.length ? `${base} (${quals.join(", ")})` : base;
       if (f.country) subject = (DEMONYMS[f.country] || f.country) + " " + subject;
     }
+    return { subject, conditions: adv, rangeText: cs.range === "wc" ? "All data from the WC." : "All data since last WC." };
+  }
+  function filterSentence(count, omitCount) {
+    const disc = cs.discipline === "batting" ? "Batting" : "Bowling";
+    const { subject, conditions } = sentenceParts();
     let s = `${disc} Stats for ${subject}`;
-    if (adv) s += ` where ${adv}`;
+    if (conditions) s += ` where ${conditions}`;
+    if (omitCount) return `${s}.`;
     return `${s}. Player count = ${count}.`;
   }
 

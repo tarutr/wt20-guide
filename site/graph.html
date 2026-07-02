@@ -1,0 +1,1500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WT20 Graph Builder — Mockup v3</title>
+<script src="./chart.min.js"></script>
+<script src="./html2canvas.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c0d12;--panel:#13151D;--panel2:#0F1118;--text:#ECECEE;--dim:#9A9AA3;--faint:#6E6E78;
+    --border:rgba(255,255,255,.10);--soft:rgba(255,255,255,.05);--chip:#1B1E27;--accent:#E4324B;
+    --type-nm:#D6D6DD;
+    /* paper artifact palette — intentionally fixed regardless of dashboard theme:
+       the card is the exportable "printed" artifact, so it always looks the same. */
+    --pp-bg:#faf8f5;--pp-panel:#ece8e1;--pp-text:#1a1714;--pp-sub:#7a7068;--pp-grid:#dad2c2;--pp-rule:#ddd6c8;
+    --pp-grey:#bcb3a3;
+  }
+  html[data-theme="light"]{
+    --bg:#ECECEE;--panel:#FFFFFF;--panel2:#F7F7F9;--text:#16213E;--dim:rgba(22,33,62,.62);--faint:rgba(22,33,62,.42);
+    --border:rgba(0,0,0,.09);--soft:rgba(0,0,0,.05);--chip:#F1F2F4;
+    --type-nm:rgba(22,33,62,.65);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;height:100vh;overflow:hidden}
+  .wrap{max-width:none;margin:0 auto;padding:12px 14px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+  .title{font-size:20px;font-weight:800}
+  .badge{font-size:11px;font-weight:700;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:3px 9px}
+  .note{font-size:12px;color:var(--dim);margin:3px 0 16px;line-height:1.55}
+  .note code{background:var(--chip);padding:1px 5px;border-radius:4px}
+  .layout{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:stretch;flex:1;min-height:0}
+  @media(max-width:1040px){.layout{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;min-height:0}
+  /* tabs */
+  .tabs{display:flex;padding:10px 10px 0;gap:6px;flex:none}
+  .tab{flex:1;background:none;border:none;border-radius:9px 9px 0 0;color:var(--dim);font-family:inherit;font-size:12.5px;font-weight:700;padding:9px;cursor:pointer}
+  .tab.on{background:var(--panel2);color:var(--text)}
+  .tabbody{padding:12px 13px;overflow-y:auto;flex:1;min-height:0}
+  .pane{display:none}.pane.on{display:block}
+  .sec{margin-bottom:11px}.sec:last-child{margin-bottom:0}
+  .sec-h{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);margin-bottom:6px;display:flex;gap:8px;align-items:baseline;justify-content:space-between}
+  .segrow{display:flex;gap:7px}.segrow .seg{flex:1.35;min-width:0}.segrow .btn{flex:1;white-space:nowrap;min-width:0;padding-left:8px;padding-right:8px}
+  .sec-h .mini{font-weight:600;letter-spacing:0;text-transform:none;font-size:11px;font-style:italic;color:var(--faint);cursor:pointer}
+  .sec-h .mini:hover{color:var(--accent)}
+  .seg{display:inline-flex;background:var(--chip);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .seg.full{display:flex}.seg.full button{flex:1}
+  .seg button{background:none;border:none;color:var(--dim);font-family:inherit;font-size:11.5px;font-weight:700;padding:6px 8px;cursor:pointer}
+  .seg button.on{background:var(--accent);color:#fff}
+  /* dropdowns / search */
+  .dd{position:relative;margin-bottom:0}
+  .dd-btn,.search input{width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:8px 11px;color:var(--text);font-family:inherit;font-size:12.5px;outline:none;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .search input{cursor:text}
+  .dd-btn:hover{border-color:var(--faint)}
+  .dd-btn .ca{color:var(--faint);font-size:10px}
+  .dd-menu{position:absolute;top:40px;left:0;right:0;background:var(--panel);border:1px solid var(--border);border-radius:9px;max-height:260px;overflow:auto;z-index:40;display:none;box-shadow:0 16px 44px rgba(0,0,0,.55);padding:5px}
+  .dd-menu.on{display:block}
+  .dd-grp{font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:8px 8px 4px}
+  .dd-it{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12.5px;font-weight:600;color:var(--dim);cursor:pointer}
+  .dd-it:hover{background:var(--soft);color:var(--text)}
+  .dd-it.on{color:var(--text)}
+  .dd-it .bx{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--faint);flex:none;display:flex;align-items:center;justify-content:center}
+  .dd-it.on .bx{background:var(--accent);border-color:var(--accent)}
+  .dd-it.on .bx::after{content:"\2713";color:#fff;font-size:9px;font-weight:800}
+  .dd-it .fam{margin-left:auto;font-size:9px;font-weight:700;text-transform:uppercase;color:var(--faint)}
+  .selrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12.5px;color:var(--text)}
+  .selrow-off{opacity:.45}
+  .selnm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .selchk{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--faint);flex:none;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .selchk.on{background:var(--accent);border-color:var(--accent)}
+  .selchk.on::after{content:"\2713";color:#fff;font-size:9px;font-weight:800}
+  .selrow-off .selchk{cursor:not-allowed}
+  .selrow:hover{background:var(--soft)}
+  .selrow .x{cursor:pointer;color:var(--faint);font-weight:800}.selrow .x:hover{color:var(--accent)}
+  .selrow small{color:var(--faint);margin-left:6px}
+  .pcount{font-size:11px;color:var(--faint);font-style:italic;margin-top:6px}
+  /* chart type list */
+  .types{display:flex;flex-direction:column;gap:5px}
+  .type{position:relative;text-align:left;background:var(--chip);border:1px solid var(--border);border-radius:9px;padding:7px 10px;cursor:pointer}
+  .type:hover{border-color:var(--faint)}
+  .type.sel{border-color:var(--accent)}
+  .type.rec{box-shadow:inset 0 0 0 1px var(--accent)}
+  .type .nm{font-size:12.5px;font-weight:700;color:var(--type-nm);display:flex;justify-content:space-between;align-items:center}
+  .type.sel .nm,.type.rec .nm{color:var(--text)}
+  .type .con{font-size:10px;font-style:italic;color:var(--dim);margin-top:2px}
+  .type .tg{font-size:8.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--accent)}
+  .type.off{opacity:.72;cursor:not-allowed}.type.off .nm{color:var(--dim)}.type.off .tg{color:var(--faint)}
+  /* details controls */
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+  .row label{font-size:12px;color:var(--dim);font-weight:600}
+  .ti{width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:12.5px;padding:8px 10px;outline:none}
+  .ti:focus{border-color:var(--accent)}
+  .switch{width:36px;height:20px;border-radius:999px;background:var(--faint);position:relative;cursor:pointer;flex:none;transition:.15s}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:999px;background:#fff;transition:.15s}
+  .switch.on{background:var(--accent)}.switch.on::after{left:18px}
+  .swatches{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+  .sw{width:20px;height:20px;border-radius:6px;cursor:pointer;border:2px solid transparent;padding:0}
+  .sw.on{border-color:var(--text)}
+  .grad{width:20px;height:20px;border-radius:6px;padding:0;border:none;cursor:pointer;background:conic-gradient(red,#ff0,#0f0,#0ff,#00f,#f0f,red);position:relative;display:inline-block;overflow:hidden}
+  .pl-color{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .drag-grip{cursor:grab;color:var(--faint);font-size:13px;line-height:1;flex:none;user-select:none}
+  .hi-sun{margin-left:auto;cursor:pointer;color:var(--faint);font-size:14px;flex:none;user-select:none;padding:2px}
+  .hi-sun.on{color:var(--accent)}
+  .hi-sun:hover{color:var(--text)}
+  .reorder-row{cursor:default}
+  .donut-cutoff{display:flex;justify-content:space-between;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);border-top:1px dashed var(--border);border-bottom:1px dashed var(--border);padding:4px 2px;margin:2px 0 6px}
+  .reorder-row.dragging{opacity:.4}
+  .pl-color .dot{width:14px;height:14px;border-radius:999px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+  .pl-color .nm{font-size:12px;color:var(--text);flex:1}
+  .pl-color input[type=color]{width:22px;height:22px;border:none;background:none;padding:0;border-radius:6px;cursor:pointer}
+  .hint2{font-size:10.5px;color:var(--faint);font-style:italic;margin:2px 0 8px}
+  /* filters popup */
+  .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:100}
+  .modal-back.on{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:14px;width:min(440px,94vw);padding:18px}
+  .modal h3{font-size:15px;margin-bottom:4px}
+  .modal .sub{font-size:12px;color:var(--dim);margin-bottom:14px}
+  .ff{margin-bottom:12px}
+  .ff label{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);display:block;margin-bottom:5px}
+  .ff select{width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:13px;padding:8px 10px}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+  .btn{background:none;border:1px solid var(--border);color:var(--dim);font-family:inherit;font-size:12px;font-weight:700;padding:8px 14px;border-radius:8px;cursor:pointer}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* stage */
+  .stage{padding:16px;min-height:0;overflow:hidden}
+  .stage-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex:none}
+  .stage-top .lbl{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .canvas-host{display:flex;align-items:center;justify-content:center;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:12px;flex:1;min-height:0;overflow:hidden}
+  /* THE PAPER CARD (artifact) */
+  .card{width:100%;max-width:820px;max-height:100%;aspect-ratio:16/9;background:var(--pp-bg);border:1px solid #e7e1d6;border-radius:6px;box-shadow:0 14px 44px rgba(0,0,0,.5);
+        display:flex;flex-direction:column;padding:0;color:var(--pp-text);overflow:hidden}
+  .card .card-head{padding:17px 30px 13px}
+  .card .eyebrow{font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--pp-sub);margin-bottom:7px;outline:none}
+  .card .ctitle{font-family:'DM Serif Display',serif;font-size:27px;line-height:1.12;margin-top:0;color:var(--pp-text);outline:none}
+  .card .csub{font-family:'DM Sans',sans-serif;font-size:14.5px;color:var(--pp-sub);margin-top:6px;line-height:1.35;outline:none}
+  .card [contenteditable]:hover{background:rgba(0,0,0,.035);border-radius:3px}
+  .card [contenteditable]:focus{background:rgba(0,0,0,.05);border-radius:3px}
+  .card .charea{flex:1;min-height:0;position:relative;background:var(--pp-panel);border-top:1px solid var(--pp-rule);border-bottom:1px solid var(--pp-rule)}
+  .chartEmpty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px 40px;font-family:'DM Sans',sans-serif;font-size:13.5px;font-style:italic;color:var(--pp-sub);line-height:1.6}
+  .card .charea canvas{position:absolute;inset:0}
+  .card .multi{display:grid;gap:8px 14px;height:100%;padding:8px 14px}
+  .card .multi .mini{position:relative;min-height:0}
+  .card .multi .mini .mlab{position:absolute;top:0;left:0;right:0;text-align:center;font-family:'DM Sans';font-size:12px;font-weight:600;color:var(--pp-text)}
+  .card .foot{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;padding:13px 30px 16px;
+        font-family:'DM Sans',sans-serif;font-size:12.5px;font-style:italic;color:var(--pp-sub)}
+  .card .foot .fr{font-style:italic;white-space:nowrap}
+  .card .foot .fl{outline:none;min-width:40px}
+  .card .foot .fl.cf-ph{opacity:.5}
+  .axisEdit{position:absolute;display:none;z-index:5;background:#fff;border:1px solid var(--accent);border-radius:5px;font-family:'DM Sans';font-size:12px;padding:3px 6px;color:#1a1714;outline:none}
+  .exportbar{display:flex;align-items:center;gap:10px;margin-top:14px}
+  a.dl{display:none}
+  .filein{display:none}
+  .foothelp{margin-top:10px;font-size:11px;color:var(--faint);line-height:1.5;flex:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar" style="display:none">
+    <div class="title">Graph Builder</div><span class="badge">Mockup v4</span>
+    <div style="flex:1"></div>
+    <button class="btn" id="upbtn">Upload data.json</button>
+    <input class="filein" id="filein" type="file" accept=".json,application/json">
+    <span id="datasrc" style="font-size:11px;color:var(--faint)"></span>
+  </div>
+
+  <div class="layout">
+    <!-- LEFT -->
+    <div class="panel">
+      <div class="tabs">
+        <button class="tab on" data-pane="sel">Chart Selection</button>
+        <button class="tab" data-pane="det">Chart Details</button>
+        <button class="tab" data-pane="info">Chart Info</button>
+      </div>
+      <div class="tabbody">
+        <!-- SELECTION -->
+        <div class="pane on" id="pane-sel">
+          <div class="sec">
+            <div class="sec-h"><span>Players</span></div>
+            <div class="dd">
+              <div class="search"><input id="psearch" placeholder="Search players to add…" autocomplete="off"></div>
+              <div class="dd-menu" id="presults"></div>
+            </div>
+            <div class="dd" style="margin-top:6px">
+              <button class="dd-btn" id="selBtn"><span id="selLabel">0 players selected</span><span class="ca">&#9660;</span></button>
+              <div class="dd-menu" id="selMenu"></div>
+            </div>
+            <div class="pcount" id="setNote"></div>
+          </div>
+          <div class="sec">
+            <div class="sec-h"><span>Filters &amp; metrics</span></div>
+            <div class="segrow">
+              <div class="seg full" id="disc"><button data-v="batting" class="on">Batting</button><button data-v="bowling">Bowling</button></div>
+              <button class="btn" id="advBtn">Advanced Filters</button>
+            </div>
+            <div class="dd" style="margin-top:8px">
+              <button class="dd-btn" id="metBtn"><span id="metLabel">Choose metrics…</span><span class="ca">&#9660;</span></button>
+              <div class="dd-menu" id="metMenu"></div>
+            </div>
+          </div>
+          <div class="sec">
+            <div class="sec-h"><span>Chart type</span></div>
+            <div class="types" id="types"></div>
+          </div>
+        </div>
+        <!-- DETAILS -->
+        <div class="pane" id="pane-det">
+          <div class="sec">
+            <div class="sec-h"><span>Header</span></div>
+            <input class="ti" id="ctitle" placeholder="Title" style="font-weight:700;margin-bottom:7px">
+            <input class="ti" id="csub" placeholder="Sub-header (italic)">
+          </div>
+          <div class="sec">
+            <div class="sec-h"><span>Footer (dataset, bottom-left)</span></div>
+            <div class="seg full" id="footMode"><button data-v="auto" class="on">Auto</button><button data-v="custom">Custom</button><button data-v="off">Off</button></div>
+            <input class="ti" id="footCustom" placeholder="Custom footer text" style="margin-top:7px;display:none">
+          </div>
+          <div class="sec" id="variantSec"></div>
+          <div class="sec" id="togSec"></div>
+          <div class="sec" id="axisSec"></div>
+          <div class="sec" id="scatterSec" style="display:none"></div>
+          <div class="sec">
+            <div class="sec-h"><span>Colours</span></div>
+            <div id="colorBox"></div>
+          </div>
+        </div>
+        <!-- CHART INFO -->
+        <div class="pane" id="pane-info">
+          <div class="sec"><div class="sec-h"><span id="infoTitle">How to read this chart</span></div>
+            <div id="infoBody" style="font-size:12.5px;color:var(--dim);line-height:1.65"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="panel stage">
+      <div class="stage-top"><div style="flex:1"></div>
+        <button class="btn primary" id="download">Download PNG</button><a class="dl" id="dllink"></a></div>
+      <div class="canvas-host">
+        <div class="card" id="card">
+          <div class="card-head">
+            <div class="eyebrow" id="cEyebrow"><img src="favicon.ico" alt="" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px;border-radius:3px">Best of Cricket</div>
+            <div class="ctitle" id="cTitle" contenteditable="true" spellcheck="false"></div>
+            <div class="csub" id="cSub" contenteditable="true" spellcheck="false"></div>
+          </div>
+          <div class="charea" id="cArea"><canvas id="chart"></canvas><div class="multi" id="multi" style="display:none"></div><div class="chartEmpty" id="chartEmpty" style="display:none"></div><input class="axisEdit" id="axisEdit" spellcheck="false"></div>
+          <div class="foot" id="cFoot"><span class="fl" id="cFootL" contenteditable="true" spellcheck="false"></span><span class="fr">bestofcricket.substack.com</span></div>
+        </div>
+      </div>
+      <div class="foothelp">Roster: Bar (vertical/horizontal), Scatter, Radar (separate default, max 6), Donut/Pie. Radar uses a normalised 0–100 scale with a floor so the lowest value still shows. Scatter plots the whole selected set in grey — hover to find a player, click a dot to highlight + label it.</div>
+    </div>
+  </div>
+</div>
+
+<!-- filters popup -->
+<div class="modal-back" id="filtersBack">
+  <div class="modal">
+    <h3>Advanced filters</h3>
+    <div class="sub">Simplified stand-in — the full Compare Stats advanced builder (AND/OR conditions) ports here in the real build. These define the plotted set and the auto footer.</div>
+    <div class="ff"><label>Role</label><select id="f-role"></select></div>
+    <div class="ff"><label>Bat / Bowl hand</label><select id="f-hand"></select></div>
+    <div class="ff"><label>Country</label><select id="f-country"></select></div>
+    <div class="modal-foot"><button class="btn" id="fClear">Clear</button><button class="btn primary" id="fApply">Apply filters</button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+const PP = {bg:'#faf8f5',panel:'#ece8e1',text:'#1a1714',sub:'#7a7068',grid:'#dad2c2',tick:'#7a7068',axis:'#cdc4b4',grey:'#bcb3a3'};
+const PRESETS = ['#c9372c','#1a7a5e','#b87c0e','#3a6ea5','#7d5a8c','#6b7a3a','#8a5a3a','#5a6b6e','#a8862b','#2f8f79'];
+const OTHER_ID='__other__'; // sentinel id for donut's grouped "Other" slice — colorable/highlightable like a real player
+// Team colours, tuned from index.html's TEAM_COLORS for legibility against the paper card's
+// cream background (several source primaries are quite light/pastel and wash out otherwise).
+// South Africa uses its secondary colour, not primary — the source data gives it the exact
+// same primary as Australia, which would make their default player colours indistinguishable.
+const TEAM_COLORS={
+  australia:'#c99418', bangladesh:'#178a5e', england:'#d62d3a', india:'#2668cc',
+  ireland:'#0f8f70', netherlands:'#e2551f', new_zealand:'#2f7dc2', pakistan:'#0f8f4a',
+  scotland:'#3163a8', south_africa:'#137a4a', sri_lanka:'#c9720f', west_indies:'#b81a3a',
+};
+function teamSlug(s){ return String(s||'').toLowerCase().replace(/\s+/g,'_'); }
+function teamColorFor(p){ return TEAM_COLORS[teamSlug(p&&p.country)] || null; }
+const DEMONYMS = {"Australia":"Australian","Bangladesh":"Bangladeshi","England":"English","India":"Indian","Ireland":"Irish","Netherlands":"Dutch","New Zealand":"Kiwi","Pakistan":"Pakistani","Scotland":"Scottish","South Africa":"South African","Sri Lanka":"Sri Lankan","West Indies":"West Indian"};
+const BODY="'DM Sans', sans-serif";
+
+const METRICS = {
+  batting:{
+    attribute:[{key:'age',label:'Age',family:'rate',dp:0}],
+    basic:[{key:'innings_batted',label:'Inns',family:'total',dp:0},{key:'runs',label:'Runs',family:'total',dp:0},{key:'batting_average',label:'Avg',family:'rate',dp:2},{key:'batting_sr',label:'Bat SR',family:'rate',dp:2},{key:'fifties_plus',label:'50+',family:'total',dp:0},{key:'highest_score',label:'HS',family:'peak',dp:0}],
+    advanced:[{key:'first_10_ball_sr',label:'First-10 SR',family:'rate',dp:2},{key:'powerplay_sr',label:'PP SR',family:'rate',dp:2},{key:'sr_edge',label:'SR Edge',family:'edge',dp:2},{key:'balls_per_boundary',label:'Balls/Bdry',family:'rate',low:true,dp:2},{key:'dot_pct',label:'Dot %',family:'pct',low:true,dp:1},{key:'non_boundary_sr',label:'Non-bdry SR',family:'rate',dp:2}]
+  },
+  bowling:{
+    attribute:[{key:'age',label:'Age',family:'rate',dp:0}],
+    basic:[{key:'innings_bowled',label:'Inns',family:'total',dp:0},{key:'wickets',label:'Wkts',family:'total',dp:0},{key:'economy',label:'Econ',family:'rate',low:true,dp:2},{key:'bowling_average',label:'Bowl Avg',family:'rate',low:true,dp:2},{key:'bowling_sr',label:'Bowl SR',family:'rate',low:true,dp:2},{key:'three_wicket_hauls',label:'3WI',family:'total',dp:0}],
+    advanced:[{key:'top7_wickets',label:'Top7 Wkts',family:'total',dp:0},{key:'top7_bowling_sr',label:'Top7 Bowl SR',family:'rate',low:true,src:'graph',dp:2},{key:'wicket_edge',label:'Wkt Edge',family:'edge',dp:2},{key:'bowling_dot_pct',label:'Bowl Dot %',family:'pct',dp:1},{key:'boundary_runs_per_over',label:'Bdry/over',family:'rate',low:true,dp:2},{key:'econ_edge',label:'Econ Edge',family:'edge',dp:2}]
+  }
+};
+const CHARTS = [
+  {id:'bar',label:'Bar',con:'1 metric',min:1,max:1},
+  {id:'scatter',label:'Scatter',con:'exactly 2 metrics · any number of players',min:2,max:2,cap:Infinity},
+  {id:'radar',label:'Radar',con:'3+ metrics · max 6 players',min:3,max:99,cap:6},
+  {id:'donut',label:'Donut / Pie',con:'1 total metric · top 7 shown, rest grouped as "Other"',min:1,max:1,additive:true,cap:20},
+  {id:'arrow',label:'Arrow / Slope',con:'1 non-total metric · max 8 players · Since WC ⇄ WC',min:1,max:1,cap:8,excludeTotal:true},
+];
+const CAPS={bar:14,scatter:Infinity,radar:6,donut:20,arrow:8};
+
+const state = {
+  discipline:'batting', range:'pre', players:[], sel:[], candidates:[], colors:{}, highlight:[],
+  metrics:{batting:['batting_sr','batting_average'], bowling:['economy','wickets']}, axisLabels:{},
+  type:'bar', barOrient:'h', donutCut:'52%', radarSep:true, arrowStyle:'arrow', arrowCols:'1', barNums:false, donutNums:false, donutPct:false, arrowNums:true, arrowBands:true, selRank:null,
+  title:'[Title]', sub:'[Subtitle]', footMode:'auto', footCustom:'', footShow:true,
+  legend:true, axis:true, grid:true,
+  quadOn:false, quadMode:'data', quadLabels:{tl:'',tr:'',bl:'',br:''}, trend:false,
+  dotUnsel:PP.grey, dotSel:'#c9372c',
+  filters:{role:'',hand:'',country:''}, csSentence:'', csSentenceParts:null, manualIds:new Set()
+};
+let chart=null, miniCharts=[];
+
+/* ---------- data ---------- */
+const rnd=(a,b)=>a+Math.random()*(b-a), r1=n=>Math.round(n*10)/10;
+function sBat(){const sr=r1(rnd(95,162)),avg=r1(rnd(15,48));return{innings_batted:Math.round(rnd(10,70)),runs:Math.round(rnd(200,2200)),batting_average:avg,batting_sr:sr,fifties_plus:Math.round(rnd(0,18)),highest_score:Math.round(rnd(40,120)),first_10_ball_sr:r1(sr-rnd(5,30)),powerplay_sr:r1(sr+rnd(-15,22)),sr_edge:r1(rnd(-20,26)),balls_per_boundary:r1(rnd(4,9)),dot_pct:r1(rnd(28,52)),non_boundary_sr:r1(rnd(55,95))};}
+function sBowl(){const ec=r1(rnd(5.6,8.6));return{innings_bowled:Math.round(rnd(8,60)),wickets:Math.round(rnd(5,95)),economy:ec,bowling_average:r1(rnd(15,35)),bowling_sr:r1(rnd(13,30)),three_wicket_hauls:Math.round(rnd(0,9)),top7_wickets:Math.round(rnd(3,70)),wicket_edge:r1(rnd(-8,9)),bowling_dot_pct:r1(rnd(34,58)),boundary_runs_per_over:r1(rnd(1.4,3.2)),econ_edge:r1(rnd(-1.2,1.4))};}
+function sampleData(){
+  const N=[['Beth Mooney','Australia'],['Smriti Mandhana','India'],['Nat Sciver-Brunt','England'],['Sophie Devine','New Zealand'],['Laura Wolvaardt','South Africa'],['Hayley Matthews','West Indies'],['Chamari Athapaththu','Sri Lanka'],['Marufa Akter','Bangladesh'],['Alyssa Healy','Australia'],['Harmanpreet Kaur','India'],['Amelia Kerr','New Zealand'],['Tahlia McGrath','Australia'],['Shafali Verma','India'],['Sophie Ecclestone','England'],['Deepti Sharma','India'],['Ashleigh Gardner','Australia'],['Nida Dar','Pakistan'],['Sune Luus','South Africa']];
+  const roles=['Batter','All-Rounder','Bowler','Wicket Keeper'];
+  return N.map((n,i)=>{const pb=sBat(),pw=sBowl();return{id:'s'+i,name:n[0],country:n[1],age:Math.round(rnd(19,36)),role:roles[i%4],hand:Math.random()<0.7?'RHB':'LHB',pre:Object.assign({age:Math.round(rnd(19,36))},pb,pw),wc:Object.assign({},pb,pw),graph:{top7_bowling_sr:r1(rnd(13,26))}};});
+}
+function adapt(raw){return(raw.players||raw||[]).map((p,i)=>({id:p.id||('p'+i),name:p.name||('Player '+(i+1)),country:p.nationality||p.country||'',age:p.age,role:p.role||'',hand:p.batting_hand||'',bowlhand:p.bowling_hand||'',pre:Object.assign({age:p.age},p.pre_wc_stats||{}),wc:Object.assign({age:p.age},p.wc_stats||{}),graph:Object.assign({},p.graph_data||{})})).filter(p=>p.pre||p.wc);}
+
+/* ---------- helpers ---------- */
+function allMetrics(){const m=METRICS[state.discipline];return m.attribute.concat(m.basic,m.advanced);}
+function mByKey(k){return allMetrics().find(m=>m.key===k)||null;}
+function curMet(){return state.metrics[state.discipline];}
+function setMet(arr){state.metrics[state.discipline]=arr;}
+function selM(){return curMet().map(mByKey).filter(Boolean);}
+function axLab(key,def){const v=state.axisLabels[key];return(v!=null&&v!=='')?v:def;}
+function val(p,key){const m=mByKey(key);if(m&&m.src==='graph')return p.graph&&typeof p.graph[key]==='number'?p.graph[key]:null;if(key==='age')return typeof p.age==='number'?p.age:null;const o=(state.range==='wc'?p.wc:p.pre)||{};const v=o[key];if(v==null&&m&&m.family==='total')return 0;return typeof v==='number'?v:null;}
+function matchFilters(p){const f=state.filters;if(f.role&&p.role!==f.role)return false;if(f.hand&&p.hand!==f.hand)return false;if(f.country&&p.country!==f.country)return false;return true;}
+function plottedPlayers(){return state.sel.map(id=>state.players.find(p=>p.id===id)).filter(Boolean);}
+// Default arrangement for a fresh candidate list: grouped by country, alphabetically, then
+// by name within a country. Manual drag-reordering (Colours section) overrides this until
+// the next fresh filter/search result replaces the candidate list.
+function sortByCountry(ids){
+  return ids.slice().sort((a,b)=>{
+    const pa=state.players.find(p=>p.id===a), pb=state.players.find(p=>p.id===b);
+    const ca=(pa&&pa.country)||'', cb=(pb&&pb.country)||'';
+    if(ca!==cb) return ca.localeCompare(cb);
+    return ((pa&&pa.name)||'').localeCompare((pb&&pb.name)||'');
+  });
+}
+function capFor(type){
+  if(type==='arrow') return state.arrowStyle==='slope' ? 8 : (state.arrowCols==='2' ? 8 : 10);
+  const c=CAPS[type]; return c===undefined ? Infinity : c;
+}
+function applyCap(list,cap){ return cap===Infinity ? list.slice() : list.slice(0,cap); }
+// Called whenever the active chart type changes: shrink the checked/plotted set
+// to the new type's cap (keeping existing checks where possible, dropping the
+// tail), or — for uncapped types like Scatter — check every candidate. Never
+// touches state.candidates, so switching type never loses anyone from the list.
+function arrowHasBoth(p,key){ const a=p.pre?p.pre[key]:null, b=p.wc?p.wc[key]:null; return typeof a==='number' && typeof b==='number'; }
+function reconcileArrowSel(cap){
+  const me=selM()[0];
+  if(!me){ state.sel=applyCap(state.candidates,cap); return; }
+  const hasBoth=id=>{ const p=state.players.find(x=>x.id===id); return !!p && arrowHasBoth(p,me.key); };
+  const curValid=state.sel.filter(id=>state.candidates.includes(id)&&hasBoth(id));
+  const otherValid=state.candidates.filter(id=>hasBoth(id)&&!curValid.includes(id));
+  const invalid=state.candidates.filter(id=>!hasBoth(id));
+  state.sel=curValid.concat(otherValid).concat(invalid).slice(0,cap);
+}
+function reconcileSelForType(){
+  const cap=capFor(state.type);
+  if(state.type==='arrow'){ reconcileArrowSel(cap); }
+  else if(state.type==='donut'){ reconcileDonutSel(cap); }
+  else if(cap===Infinity){ state.sel=state.candidates.slice(); }
+  else if(state.sel.length>cap){ state.sel=state.sel.slice(0,cap); }
+  state.highlight=state.highlight.filter(id=>state.sel.includes(id));
+}
+// Donut defaults to biggest-value-first (so the initial top-7/Other split is the sensible
+// one), but this only runs on a fresh landing / metric change — subsequent drag-reordering
+// in the Colours section is left completely alone.
+function reconcileDonutSel(cap){
+  const me=selM()[0];
+  state.sel=applyCap(state.candidates,cap);
+  if(me){
+    state.sel=state.sel.slice().sort((a,b)=>{
+      const pa=state.players.find(p=>p.id===a), pb=state.players.find(p=>p.id===b);
+      const va=pa?(typeof val(pa,me.key)==='number'?val(pa,me.key):0):0;
+      const vb=pb?(typeof val(pb,me.key)==='number'?val(pb,me.key):0):0;
+      return vb-va;
+    });
+  }
+}
+function toggleSelCheck(id){
+  const cap=capFor(state.type);
+  if(state.sel.includes(id)){
+    state.sel=state.sel.filter(x=>x!==id);
+  } else {
+    if(cap!==Infinity && state.sel.length>=cap) return; // at cap — checkbox is disabled, this is just a safety guard
+    state.sel.push(id);
+  }
+  state.highlight=state.highlight.filter(x=>state.sel.includes(x));
+  refreshSel(); buildDetails(); render();
+}
+function colorOf(p,i){return state.colors[p.id]||teamColorFor(p)||PRESETS[i%PRESETS.length];}
+function hex(h,a){if(typeof h!=='string'||h[0]!=='#')return h;const c=h.replace('#','');const r=parseInt(c.substr(0,2),16),g=parseInt(c.substr(2,2),16),b=parseInt(c.substr(4,2),16);return`rgba(${r},${g},${b},${a})`;}
+function normFn(players,key){const vs=players.map(p=>val(p,key)).filter(v=>v!=null);const mn=Math.min(...vs),mx=Math.max(...vs),m=mByKey(key);
+  return p=>{const v=val(p,key);if(v==null)return 8;let t=mx===mn?55:8+((v-mn)/(mx-mn))*92;if(m&&m.low)t=108-t;return Math.round(t);};} // floor 8 so min still shows
+// Best/worst-performer selection (Bar/Radar/Arrow, only offered once there are more
+// candidates than the chart can show). Bar/Radar reuse normFn's existing direction-aware
+// scoring (already flips for "lower is better" metrics), averaged across metrics for Radar.
+// Arrow ranks by size of change instead, since it compares two values per player rather
+// than one static value — "best" there means most improved.
+function rankAndApply(mode){
+  const cap=capFor(state.type), mets=selM();
+  if(!mets.length||!state.candidates.length) return;
+  let scored;
+  if(state.type==='arrow'){
+    const me=mets[0];
+    scored=state.candidates.map(id=>{
+      const p=state.players.find(x=>x.id===id);
+      const a=p&&p.pre?p.pre[me.key]:null, b=p&&p.wc?p.wc[me.key]:null;
+      if(typeof a!=='number'||typeof b!=='number') return null; // no valid comparison possible — exclude, don't sentinel-score
+      const delta=me.low?(a-b):(b-a); // positive delta = improvement, regardless of metric direction
+      return {id,score:delta};
+    }).filter(Boolean);
+  } else {
+    const pool=state.candidates.map(id=>state.players.find(p=>p.id===id)).filter(Boolean);
+    const fns=mets.map(me=>normFn(pool,me.key));
+    scored=state.candidates.map(id=>{
+      const p=state.players.find(x=>x.id===id);
+      if(!p) return null;
+      if(mets.every(me=>val(p,me.key)==null)) return null; // no data for any selected metric — exclude entirely
+      const score=fns.reduce((s,f)=>s+f(p),0)/fns.length;
+      return {id,score};
+    }).filter(Boolean);
+  }
+  scored.sort((x,y)=> mode==='best' ? y.score-x.score : x.score-y.score);
+  state.sel=scored.slice(0,cap).map(s=>s.id);
+  state.highlight=state.highlight.filter(id=>state.sel.includes(id));
+}
+
+/* ---------- recommender + type list ---------- */
+function arrowBothCount(field){
+  return state.candidates.filter(id=>{
+    const p=state.players.find(x=>x.id===id); if(!p) return false;
+    const a=p.pre?p.pre[field.key]:null, b=p.wc?p.wc[field.key]:null;
+    return typeof a==='number' && typeof b==='number';
+  }).length;
+}
+function recommend(){
+  const sel=selM(),n=sel.length;const fams=sel.map(m=>m.family);
+  const allTotal=n>0&&fams.every(f=>f==='total');const st={},why={};
+  CHARTS.forEach(c=>{
+    let ok=n>=c.min&&n<=c.max; let reason='';
+    if(!ok){ reason = n<c.min?`needs ${c.min}+ metric${c.min>1?'s':''}`:`needs at most ${c.max}`; }
+    if(ok&&c.additive&&!allTotal){ ok=false; reason='needs additive “total” metrics'; }
+    if(ok&&c.excludeTotal&&fams.some(f=>f==='total')){ ok=false; reason='not for total metrics'; }
+    if(ok&&c.id==='arrow'&&n===1){
+      const bothN=arrowBothCount(sel[0]);
+      if(bothN<2){ ok=false; reason = bothN===0 ? 'no players have both WC & since-WC data' : 'needs 2+ players with both WC & since-WC data'; }
+    }
+    st[c.id]=ok?'ok':'off'; if(reason) why[c.id]=reason;
+  });
+  // pick recommended among ok
+  let pick=null;
+  if(st.scatter==='ok'&&n===2&&fams.every(f=>f==='rate'||f==='pct')) pick='scatter';
+  else if(st.radar==='ok'&&n>=3) pick='radar';
+  else if(st.donut==='ok'&&allTotal) pick='donut';   // totals → parts-of-a-whole
+  else if(st.bar==='ok') pick='bar';
+  else if(st.donut==='ok') pick='donut';
+  else if(st.scatter==='ok') pick='scatter';
+  else { const f=CHARTS.find(c=>st[c.id]==='ok'); pick=f?f.id:null; }
+  return {st,why,pick};
+}
+function paintTypes(rec){
+  const host=document.getElementById('types');host.innerHTML='';
+  CHARTS.forEach(c=>{
+    const s=rec.st[c.id], el=document.createElement('button');
+    el.className='type'+(s==='off'?' off':'')+(state.type===c.id?' sel':'')+(rec.pick===c.id?' rec':'');
+    const tag=rec.pick===c.id?'<span class="tg">Recommended</span>':'';
+    const con = rec.why[c.id] ? rec.why[c.id] : c.con;
+    el.innerHTML=`<div class="nm">${c.label}${tag}</div><div class="con">${con}</div>`;
+    if(s!=='off') el.onclick=()=>{ const wasActive=state.type===c.id; switchType(c.id);reconcileSelForType();refreshSel();buildDetails();render(); if(wasActive) switchToTab('det'); };
+    host.appendChild(el);
+  });
+}
+
+/* ---------- chart config ---------- */
+function chartFont(sz,opts){return Object.assign({family:BODY,size:sz},opts||{});}
+function baseScales(){const ax=()=>({grid:{display:state.grid,color:PP.grid},ticks:{color:PP.tick,font:chartFont(12)},border:{color:PP.axis},title:{color:PP.sub,font:chartFont(13,{weight:'600'})}});return{x:ax(),y:ax()};}
+function commonOpts(extra){return Object.assign({responsive:true,maintainAspectRatio:false,animation:{duration:250},
+  layout:{padding:{top:8,right:30,bottom:4,left:30}},
+  plugins:{legend:{display:state.legend&&(state.type==='donut'||(state.type==='radar'&&!state.radarSep)),position:'top',align:'end',labels:{color:PP.text,font:chartFont(12.5),boxWidth:12,boxHeight:12,padding:12,usePointStyle:true}},tooltip:{enabled:true}}},extra||{});}
+
+function buildChart(){
+  const players=plottedPlayers().slice(0,capFor(state.type)===Infinity?9999:capFor(state.type));
+  const mets=selM(); if(!players.length||!mets.length) return null;
+  const labels=players.map(p=>p.name), cols=players.map((p,i)=>colorOf(p,i)), t=state.type;
+
+  if(t==='bar'){const me=mets[0];
+    const hasHi=state.highlight.length>0;
+    const barVals=players.map(p=>val(p,me.key));
+    const scales=bs(me,null);
+    if(state.barNums){
+      const valAx=state.barOrient==='h'?'x':'y';
+      const dmax=Math.max(0,...barVals.filter(v=>typeof v==='number'));
+      if(dmax>0) scales[valAx].suggestedMax=dmax*1.16; // headroom for the number drawn past the bar's end
+    }
+    return {type:'bar',data:{labels,datasets:[{label:me.label,data:barVals,
+      backgroundColor:players.map((p,i)=>hex(cols[i],hasHi?(state.highlight.includes(p.id)?0.92:0.16):0.85)),
+      borderRadius:5,borderSkipped:false,maxBarThickness:64}]},
+      options:commonOpts({indexAxis:state.barOrient==='h'?'y':'x',scales,
+      onClick:(e,els)=>{ if(!els.length) return; const p=players[els[0].index]; if(p) toggleHighlight(p.id); }
+      })};
+  }
+  if(t==='scatter'){const mx=mets[0],my=mets[1]||mets[0];
+    const xv=players.map(p=>val(p,mx.key)),yv=players.map(p=>val(p,my.key));
+    const sc=baseScales();
+    sc.x.title={display:state.axis,text:axLab('x',mx.label),color:PP.sub,font:chartFont(13,{weight:'600'})};
+    sc.y.title={display:state.axis,text:axLab('y',my.label),color:PP.sub,font:chartFont(13,{weight:'600'})};
+    sc.x.grace='4%'; sc.y.grace='5%';
+    const ds=players.map((p,i)=>{const on=state.highlight.includes(p.id);
+      return {label:p.name,data:[{x:xv[i],y:yv[i]}],pid:p.id,backgroundColor:on?(state.colors[p.id]||state.dotSel):state.dotUnsel,borderColor:on?'#fff':'transparent',borderWidth:on?1.5:0,pointRadius:on?8:6,pointHoverRadius:10};});
+    return {type:'scatter',data:{datasets:ds},
+      options:commonOpts({plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label}}},scales:sc,
+        onClick:(e,els,ch)=>{if(!els.length)return;const pid=ch.data.datasets[els[0].datasetIndex].pid;
+          state.highlight=state.highlight.includes(pid)?state.highlight.filter(x=>x!==pid):state.highlight.concat(pid);buildDetails();render();}})};
+  }
+  if(t==='radar'){const fns=mets.map(me=>({me,f:normFn(players,me.key)}));
+    return {type:'radar',data:{labels:mets.map(me=>me.label),datasets:players.map((p,i)=>({label:p.name,data:fns.map(o=>o.f(p)),borderColor:cols[i],backgroundColor:hex(cols[i],.14),borderWidth:2,pointRadius:2.5}))},
+      options:commonOpts({scales:{r:{angleLines:{display:state.grid,color:PP.grid},grid:{display:state.grid,color:PP.grid},pointLabels:{color:PP.text,font:chartFont(12.5)},ticks:{display:false,backdropColor:'transparent'},suggestedMin:0,suggestedMax:100}}})};
+  }
+  if(t==='donut'){const me=mets[0];
+    let dLabels=labels, dCols=cols, dIds=players.map(p=>p.id), dVals=players.map(p=>{const v=val(p,me.key);return typeof v==='number'?v:0;});
+    if(players.length>8){
+      // First 7 in the current order (state.sel — value-sorted by default, but draggable) show
+      // individually; the rest group into "Other". This makes drag-to-promote work: whoever
+      // sits in the first 7 rows of the Colours list is shown, not whoever has the biggest value.
+      const otherSum=dVals.slice(7).reduce((s,v)=>s+v,0);
+      dLabels=labels.slice(0,7).concat([`Other (${dVals.length-7} players)`]);
+      dCols=cols.slice(0,7).concat([state.colors[OTHER_ID]||PP.grey]);
+      dIds=dIds.slice(0,7).concat([OTHER_ID]);
+      dVals=dVals.slice(0,7).concat([otherSum]);
+    }
+    state.highlight=state.highlight.filter(id=>dIds.includes(id)); // drop any stale id no longer represented by a visible slice
+    const hasHi=state.highlight.length>0;
+    return {type:'doughnut',data:{labels:dLabels,datasets:[{data:dVals,
+      backgroundColor:dIds.map((id,i)=>hex(dCols[i],hasHi?(state.highlight.includes(id)?0.95:0.16):0.9)),
+      borderColor:PP.panel,borderWidth:3}]},
+      options:commonOpts({cutout:state.donutCut,plugins:{legend:{display:state.legend,position:'right',labels:{color:PP.text,font:chartFont(12.5),boxWidth:12,padding:10,usePointStyle:true},onClick:(e,item)=>{ const id=dIds[item.index]; if(id) toggleHighlight(id); }},tooltip:{enabled:true}},
+        onClick:(e,els)=>{ if(!els.length) return; const id=dIds[els[0].index]; if(id) toggleHighlight(id); }
+      })};
+  }
+  return null;
+}
+function switchToTab(pane){
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.dataset.pane===pane));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+pane));
+}
+function toggleHighlight(id){
+  state.highlight = state.highlight.includes(id) ? state.highlight.filter(x=>x!==id) : state.highlight.concat(id);
+  buildDetails(); render();
+}
+function switchType(newType){
+  if(newType===state.type) return;
+  state.type=newType;
+  state.highlight=[]; // highlights are chart-type-specific — never carry over across a type switch
+}
+function bs(me,me2){const s=baseScales();const valAx=state.barOrient==='h'?'x':'y';const catAx=state.barOrient==='h'?'y':'x';
+  s[valAx].title={display:state.axis,text:axLab('v',me.label),color:PP.sub,font:chartFont(13,{weight:'600'})};
+  s[catAx].ticks.autoSkip=false; // never silently hide a player's name to save space
+  return s;}
+
+/* ---------- Arrow / Slope chart (custom canvas — Chart.js has no native equivalent) ---------- */
+const ARROW_WIN='#36A85B', ARROW_LOSS='#E5484D'; // matches the dashboard's win/loss palette elsewhere on the site
+const ARROW_EDGE=30; // matches the card footer's text inset — keeps all chart text within the same visual margin as the rest of the card
+let arrowHitAreas=[]; // rebuilt every draw: [{id,x1,y1,x2,y2}] line segments for click-to-highlight hit-testing
+function pointToSegDist(px,py,x1,y1,x2,y2){
+  const dx=x2-x1, dy=y2-y1, len2=dx*dx+dy*dy;
+  let t=len2===0?0:((px-x1)*dx+(py-y1)*dy)/len2;
+  t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px-(x1+t*dx),py-(y1+t*dy));
+}
+function sizeCanvasToContainer(cv){
+  const rect=cv.parentElement.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  cv.width=Math.max(1,Math.round(rect.width*dpr));
+  cv.height=Math.max(1,Math.round(rect.height*dpr));
+  cv.style.width=rect.width+'px'; cv.style.height=rect.height+'px';
+  const ctx=cv.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx,w:rect.width,h:rect.height};
+}
+function arrowDirColor(me,pre,wc){
+  if(wc===pre) return PP.grey;
+  const better = me.low ? wc<pre : wc>pre;
+  return better ? ARROW_WIN : ARROW_LOSS;
+}
+function drawArrowhead(ctx,tipX,tipY,angle,size,color){
+  ctx.save(); ctx.translate(tipX,tipY); ctx.rotate(angle);
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-size*1.7,-size*0.75); ctx.lineTo(-size*1.7,size*0.75); ctx.closePath();
+  ctx.fillStyle=color; ctx.fill(); ctx.restore();
+}
+function arrowValueScale(rows,pad){
+  let mn=Infinity,mx=-Infinity;
+  rows.forEach(r=>{mn=Math.min(mn,r.pre,r.wc);mx=Math.max(mx,r.pre,r.wc);});
+  if(mn===mx){mn-=1;mx+=1;}
+  const span=mx-mn;
+  return {mn:mn-span*pad, mx:mx+span*pad};
+}
+function truncateToWidth(ctx,text,maxW){
+  let nm=text;
+  while(ctx.measureText(nm).width>maxW && nm.length>3){ nm=nm.slice(0,-1); }
+  if(nm!==text) nm=nm.slice(0,-1)+'…';
+  return nm;
+}
+// One player's stats gathered against the current metric — used by both the renderer and
+// the sidebar info blurb (chart context now lives in the UI, never drawn on the exportable card).
+function arrowStats(){
+  const me=selM()[0];
+  if(!me) return null;
+  const plotted=plottedPlayers();
+  const rows=plotted.map(p=>{
+    const a=p.pre?p.pre[me.key]:null, b=p.wc?p.wc[me.key]:null;
+    return (typeof a==='number'&&typeof b==='number') ? {p,pre:a,wc:b} : null;
+  }).filter(Boolean);
+  return {me, rows, plottedCount:plotted.length, excluded:plotted.length-rows.length};
+}
+function drawArrowStyle(ctx,w,h,rows,me,twoCol){
+  const cols = twoCol && rows.length>3 ? 2 : 1;
+  const groups = cols===2 ? [rows.slice(0,Math.ceil(rows.length/2)), rows.slice(Math.ceil(rows.length/2))] : [rows];
+  const innerGap=18, tickH=14, titleH=state.axis?18:0, bottomGap=14, padT=14;
+  const axisY=h-bottomGap-titleH-tickH;
+  const colW=w/cols;
+  const font9=`600 9px ${BODY}`, font10=`600 10px ${BODY}`, font11=`600 11px ${BODY}`, fontTitle=`600 11px ${BODY}`;
+  // Widest value label (in px) — used to reserve enough padding at the axis ends that an
+  // outer number sitting beside an extreme dot never overflows the plot region.
+  let numPad=0;
+  if(state.arrowNums){
+    ctx.save(); ctx.font=font9;
+    rows.forEach(r=>{ numPad=Math.max(numPad, ctx.measureText(fmtNum(r.pre,me.dp)).width, ctx.measureText(fmtNum(r.wc,me.dp)).width); });
+    ctx.restore();
+    numPad += 12; // dot offset + a little breathing room
+  }
+  groups.forEach((grp,gi)=>{
+    const left=gi===0?ARROW_EDGE:innerGap/2, right=gi===cols-1?ARROW_EDGE:innerGap/2;
+    const nameW=Math.min(128,(colW-left-right)*0.4);
+    const x0=gi*colW+left+nameW+numPad, plotW=colW-left-right-nameW-numPad*2;
+    const usableH=axisY-8-padT, rowH=usableH/Math.max(grp.length,1);
+    // Data-space padding on top of the pixel reservation, so dots aren't jammed against the ticks.
+    const {mn,mx}=arrowValueScale(rows,0.06);
+    // Flip the value axis for lower-is-better metrics so an improving player always draws
+    // left-to-right, matching the higher-is-better case, instead of direction depending on
+    // which way "better" happens to point numerically.
+    const px = v => { const t=(v-mn)/(mx-mn); return me.low ? (x0+plotW-t*plotW) : (x0+t*plotW); };
+
+    if(state.arrowBands){
+      grp.forEach((r,ri)=>{ if(ri%2===1){ ctx.fillStyle=hex(PP.grid,0.4); ctx.fillRect(gi*colW+left,padT+rowH*ri,colW-left-right,rowH); } });
+    }
+    if(state.grid){
+      ctx.save(); ctx.strokeStyle=hex(PP.grid,0.7); ctx.lineWidth=1;
+      for(let t=0;t<=4;t++){ const gx=x0+plotW*(t/4); ctx.beginPath(); ctx.moveTo(gx,padT); ctx.lineTo(gx,axisY); ctx.stroke(); }
+      ctx.restore();
+    }
+    grp.forEach((r,ri)=>{
+      const cy=padT+rowH*ri+rowH/2;
+      const xPre=px(r.pre), xWc=px(r.wc);
+      const col=arrowDirColor(me,r.pre,r.wc);
+      const hasHi=state.highlight.length>0, isHi=state.highlight.includes(r.p.id);
+      const alpha=hasHi?(isHi?1:0.25):1;
+      arrowHitAreas.push({id:r.p.id,test:(hx,hy)=>hx>=gi*colW+left&&hx<=gi*colW+left+nameW+plotW&&hy>=padT+rowH*ri&&hy<=padT+rowH*(ri+1)});
+      ctx.save(); ctx.fillStyle=PP.text; ctx.font=font11; ctx.textAlign='right'; ctx.textBaseline='middle';
+      ctx.fillText(truncateToWidth(ctx,r.p.name,nameW-12), gi*colW+left+nameW-8, cy); ctx.restore();
+      ctx.save(); ctx.strokeStyle=hex(col,alpha); ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(xPre,cy); ctx.lineTo(xWc,cy); ctx.stroke(); ctx.restore();
+      const angle=xWc>=xPre?0:Math.PI;
+      drawArrowhead(ctx,xWc,cy,angle,5,hex(col,alpha));
+      ctx.beginPath(); ctx.arc(xPre,cy,4,0,Math.PI*2); ctx.fillStyle=hex(PP.grey,alpha); ctx.fill();
+      ctx.beginPath(); ctx.arc(xWc,cy,4.5,0,Math.PI*2); ctx.fillStyle=hex(col,alpha); ctx.fill();
+      if(state.arrowNums){
+        ctx.save(); ctx.font=font9; ctx.textBaseline='middle';
+        // Place each value on the OUTER side of the whole arrow span: the value belonging to
+        // the left-hand dot goes further left, the right-hand dot's value goes further right.
+        // This keeps both numbers clear of the connecting line entirely.
+        const lx=Math.min(xPre,xWc), rx=Math.max(xPre,xWc);
+        const leftIsPre = xPre<=xWc;
+        const leftVal=leftIsPre?r.pre:r.wc, rightVal=leftIsPre?r.wc:r.pre;
+        const leftCol=leftIsPre?PP.sub:col, rightCol=leftIsPre?col:PP.sub;
+        ctx.textAlign='right'; ctx.fillStyle=leftCol; ctx.fillText(fmtNum(leftVal,me.dp), lx-8, cy);
+        ctx.textAlign='left';  ctx.fillStyle=rightCol; ctx.fillText(fmtNum(rightVal,me.dp), rx+8, cy);
+        ctx.restore();
+      }
+    });
+    ctx.save(); ctx.strokeStyle=PP.axis; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x0,axisY); ctx.lineTo(x0+plotW,axisY); ctx.stroke();
+    ctx.fillStyle=PP.sub; ctx.font=font10; ctx.textAlign='center'; ctx.textBaseline='top';
+    const leftVal=me.low?mx:mn, rightVal=me.low?mn:mx;
+    ctx.fillText(fmtNum(leftVal,me.dp),x0,axisY+4);
+    ctx.fillText(fmtNum(rightVal,me.dp),x0+plotW,axisY+4);
+    ctx.restore();
+    if(state.axis){
+      ctx.save(); ctx.fillStyle=PP.sub; ctx.font=fontTitle; ctx.textAlign='center'; ctx.textBaseline='top';
+      ctx.fillText(axLab('arrowV',me.label), x0+plotW/2, axisY+tickH+2);
+      ctx.restore();
+    }
+  });
+}
+function roundTo(n,dp){ const f=Math.pow(10,dp||0); return Math.round(n*f)/f; }
+function fmtNum(n,dp){ if(typeof n!=='number'||isNaN(n)) return ''; return n.toLocaleString('en-US',{minimumFractionDigits:dp||0,maximumFractionDigits:dp||0}); }
+function nudgeLabels(items,top,bottom){ // items: [{y, ...}] sorted ascending by y — keeps a minimum gap, but always fits within [top,bottom]
+  const n=items.length;
+  if(n<=1) return items;
+  const minGap=16;
+  for(let i=1;i<n;i++){ if(items[i].y-items[i-1].y<minGap) items[i].y=items[i-1].y+minGap; }
+  if(top==null||bottom==null) return items;
+  const lo=items[0].y, hi=items[n-1].y, span=hi-lo, avail=bottom-top;
+  if(span>avail && span>0){
+    // doesn't fit even at minGap — compress proportionally so the whole cascade fits exactly,
+    // preserving relative order/spacing rather than just clamping the first item (which left
+    // everything after it unadjusted and overflowing).
+    const scale=avail/span;
+    for(let i=0;i<n;i++) items[i].y = top + (items[i].y-lo)*scale;
+  } else {
+    let shift=0;
+    if(items[0].y<top) shift=top-items[0].y;
+    else if(items[n-1].y>bottom) shift=bottom-items[n-1].y;
+    if(shift) for(let i=0;i<n;i++) items[i].y+=shift;
+  }
+  return items;
+}
+function drawSlopeStyle(ctx,w,h,rows,me){
+  const bottomGap=10, titleH=state.axis?18:0, padB=bottomGap+titleH, padT=44;
+  ctx.font=`600 11px ${BODY}`;
+  let maxW=0;
+  rows.forEach(r=>{
+    const sufPre=state.arrowNums?` (${fmtNum(r.pre,me.dp)})`:'', sufWc=state.arrowNums?` (${fmtNum(r.wc,me.dp)})`:'';
+    maxW=Math.max(maxW, ctx.measureText(r.p.name+sufPre).width, ctx.measureText(r.p.name+sufWc).width);
+  });
+  maxW=Math.min(maxW,190); // cap so one very long combined label doesn't blow out the layout
+  const leftX=ARROW_EDGE+maxW+9, rightX=w-ARROW_EDGE-maxW-9;
+  const {mn,mx}=arrowValueScale(rows,0.1);
+  // Flip for lower-is-better metrics so an improving player always slopes upward, same
+  // visual language as the higher-is-better case (item #3).
+  const y = v => { const t=(v-mn)/(mx-mn); const frac = me.low ? t : (1-t); return padT+frac*(h-padT-padB); };
+  const left=nudgeLabels(rows.map(r=>({r,y:y(r.pre)})).sort((a,b)=>a.y-b.y), padT, h-padB);
+  const right=nudgeLabels(rows.map(r=>({r,y:y(r.wc)})).sort((a,b)=>a.y-b.y), padT, h-padB);
+  const leftById={}, rightById={};
+  left.forEach(o=>leftById[o.r.p.id]=o.y); right.forEach(o=>rightById[o.r.p.id]=o.y);
+  if(state.grid){
+    ctx.save(); ctx.strokeStyle=hex(PP.grid,0.6); ctx.lineWidth=1;
+    for(let t=0;t<=4;t++){ const gy=padT+(h-padT-padB)*(t/4); ctx.beginPath(); ctx.moveTo(leftX,gy); ctx.lineTo(rightX,gy); ctx.stroke(); }
+    ctx.restore();
+  }
+  ctx.save(); ctx.strokeStyle=PP.grid; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(leftX,padT-8); ctx.lineTo(leftX,h-padB+8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(rightX,padT-8); ctx.lineTo(rightX,h-padB+8); ctx.stroke();
+  ctx.fillStyle=PP.sub; ctx.font=`700 10px ${BODY}`; ctx.textAlign='center'; ctx.textBaseline='bottom';
+  ctx.fillText('SINCE LAST WC', leftX, padT-12); ctx.fillText('WC', rightX, padT-12);
+  ctx.restore();
+  rows.forEach(r=>{
+    const y1=leftById[r.p.id], y2=rightById[r.p.id], col=arrowDirColor(me,r.pre,r.wc);
+    const hasHi=state.highlight.length>0, isHi=state.highlight.includes(r.p.id);
+    const alpha=hasHi?(isHi?1:0.25):1;
+    // Name + value combined into one bracketed label, entirely outside the plot borders —
+    // never collides with the diagonal lines, unlike a separately-positioned number would.
+    const sufPre=state.arrowNums?` (${fmtNum(r.pre,me.dp)})`:'', sufWc=state.arrowNums?` (${fmtNum(r.wc,me.dp)})`:'';
+    ctx.font=`600 11px ${BODY}`;
+    const sufPreW=ctx.measureText(sufPre).width, nmLeft=truncateToWidth(ctx,r.p.name,Math.max(20,maxW-sufPreW));
+    const nmRight=truncateToWidth(ctx,r.p.name,Math.max(20,maxW-ctx.measureText(sufWc).width));
+    const leftLabelW=ctx.measureText(nmLeft).width+ctx.measureText(sufPre).width;
+    const rightLabelW=ctx.measureText(nmRight).width+ctx.measureText(sufWc).width;
+    arrowHitAreas.push({id:r.p.id,test:(hx,hy)=>{
+      if(hx>=leftX-9-leftLabelW&&hx<=leftX-9&&hy>=y1-9&&hy<=y1+9) return true;
+      if(hx>=rightX+9&&hx<=rightX+9+rightLabelW&&hy>=y2-9&&hy<=y2+9) return true;
+      return pointToSegDist(hx,hy,leftX,y1,rightX,y2)<12;
+    }});
+    ctx.save(); ctx.strokeStyle=hex(col,alpha); ctx.lineWidth=1.75; ctx.beginPath(); ctx.moveTo(leftX,y1); ctx.lineTo(rightX,y2); ctx.stroke(); ctx.restore();
+    ctx.beginPath(); ctx.arc(leftX,y1,4,0,Math.PI*2); ctx.fillStyle=hex(PP.grey,alpha); ctx.fill();
+    ctx.beginPath(); ctx.arc(rightX,y2,4.5,0,Math.PI*2); ctx.fillStyle=hex(col,alpha); ctx.fill();
+    ctx.save(); ctx.textBaseline='middle';
+    ctx.textAlign='right'; ctx.fillStyle=PP.text; ctx.fillText(sufPre, leftX-9, y1);
+    ctx.fillStyle=PP.text; ctx.fillText(nmLeft, leftX-9-ctx.measureText(sufPre).width, y1);
+    ctx.textAlign='left'; ctx.fillStyle=PP.text; ctx.fillText(nmRight, rightX+9, y2);
+    ctx.fillStyle=col; ctx.fillText(sufWc, rightX+9+ctx.measureText(nmRight).width, y2);
+    ctx.restore();
+  });
+  if(state.axis){
+    ctx.save(); ctx.fillStyle=PP.sub; ctx.font=`600 11px ${BODY}`; ctx.textAlign='center'; ctx.textBaseline='bottom';
+    ctx.fillText(axLab('arrowV',me.label), w/2, h-bottomGap+2);
+    ctx.restore();
+  }
+}
+function renderArrowChart(){
+  const cv=document.getElementById('chart');
+  const {ctx,w,h}=sizeCanvasToContainer(cv);
+  ctx.clearRect(0,0,w,h);
+  arrowHitAreas=[];
+  const st=arrowStats();
+  if(!st) return;
+  const {me,rows}=st;
+  if(!rows.length){
+    ctx.save(); ctx.fillStyle=PP.sub; ctx.font=`italic 13px ${BODY}`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('None of the selected players have both Since WC and WC data for this metric.', w/2, h/2);
+    ctx.restore(); return;
+  }
+  if(state.arrowStyle==='slope') drawSlopeStyle(ctx,w,h,rows,me);
+  else drawArrowStyle(ctx,w,h,rows,me,state.arrowCols==='2');
+}
+let arrowResizePending=false;
+window.addEventListener('resize', ()=>{
+  if(state.type!=='arrow'||arrowResizePending) return;
+  arrowResizePending=true;
+  requestAnimationFrame(()=>{ arrowResizePending=false; if(state.type==='arrow') renderArrowChart(); });
+});
+
+/* plugins: value labels off by default; scatter quadrants/labels/trend */
+const quadPlugin={id:'quad',beforeDatasetsDraw(c){if(state.type!=='scatter'||!state.quadOn)return;const ctx=c.ctx,xs=c.scales.x,ys=c.scales.y;
+  const xset=c.data.datasets.map(d=>d.data[0].x),yset=c.data.datasets.map(d=>d.data[0].y);
+  const mid=arr=>{const s=arr.slice().sort((a,b)=>a-b);return s.length%2?s[(s.length-1)/2]:(s[s.length/2-1]+s[s.length/2])/2;};
+  let xv,yv; if(state.quadMode==='center'){xv=(xs.min+xs.max)/2;yv=(ys.min+ys.max)/2;}else{xv=mid(xset);yv=mid(yset);}
+  const px=xs.getPixelForValue(xv),py=ys.getPixelForValue(yv);
+  ctx.save();ctx.strokeStyle=PP.axis;ctx.lineWidth=1;ctx.setLineDash([5,4]);
+  ctx.beginPath();ctx.moveTo(px,c.chartArea.top);ctx.lineTo(px,c.chartArea.bottom);ctx.moveTo(c.chartArea.left,py);ctx.lineTo(c.chartArea.right,py);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=PP.sub;ctx.font=`italic 11px ${BODY}`;const q=state.quadLabels,pad=6;
+  ctx.textAlign='left';ctx.textBaseline='top';if(q.tl)ctx.fillText(q.tl,c.chartArea.left+pad,c.chartArea.top+pad);
+  ctx.textAlign='right';if(q.tr)ctx.fillText(q.tr,c.chartArea.right-pad,c.chartArea.top+pad);
+  ctx.textAlign='left';ctx.textBaseline='bottom';if(q.bl)ctx.fillText(q.bl,c.chartArea.left+pad,c.chartArea.bottom-pad);
+  ctx.textAlign='right';if(q.br)ctx.fillText(q.br,c.chartArea.right-pad,c.chartArea.bottom-pad);ctx.restore();}};
+const trendPlugin={id:'trend',afterDatasetsDraw(c){if(state.type!=='scatter'||!state.trend)return;const pts=c.data.datasets.map(d=>d.data[0]);if(pts.length<2)return;
+  const n=pts.length,sx=pts.reduce((a,p)=>a+p.x,0),sy=pts.reduce((a,p)=>a+p.y,0),sxy=pts.reduce((a,p)=>a+p.x*p.y,0),sxx=pts.reduce((a,p)=>a+p.x*p.x,0);
+  const slope=(n*sxy-sx*sy)/(n*sxx-sx*sx||1),int=(sy-slope*sx)/n,xs=c.scales.x,ys=c.scales.y;
+  const x1=xs.min,x2=xs.max,ctx=c.ctx;ctx.save();ctx.strokeStyle=hex(PP.text,.45);ctx.lineWidth=1.5;ctx.setLineDash([6,4]);
+  ctx.beginPath();ctx.moveTo(xs.getPixelForValue(x1),ys.getPixelForValue(slope*x1+int));ctx.lineTo(xs.getPixelForValue(x2),ys.getPixelForValue(slope*x2+int));ctx.stroke();ctx.restore();}};
+const ptLabelPlugin={id:'ptlabel',afterDatasetsDraw(c){
+  if(state.type!=='scatter') return;
+  const ctx=c.ctx, area=c.chartArea;
+  const allPts=[];
+  c.data.datasets.forEach((d,i)=>{ const el=c.getDatasetMeta(i).data[0]; if(el) allPts.push({x:el.x,y:el.y}); });
+  // Recompute the quadrant/trend line geometry (same math as their own draw plugins) so
+  // label placement can steer around them too, not just other dots/labels.
+  let quadPx=null, quadPy=null;
+  if(state.quadOn){
+    const xset=c.data.datasets.map(d=>d.data[0].x), yset=c.data.datasets.map(d=>d.data[0].y);
+    const mid=arr=>{const s=arr.slice().sort((a,b)=>a-b);return s.length%2?s[(s.length-1)/2]:(s[s.length/2-1]+s[s.length/2])/2;};
+    let xv,yv;
+    if(state.quadMode==='center'){xv=(c.scales.x.min+c.scales.x.max)/2;yv=(c.scales.y.min+c.scales.y.max)/2;} else {xv=mid(xset);yv=mid(yset);}
+    quadPx=c.scales.x.getPixelForValue(xv); quadPy=c.scales.y.getPixelForValue(yv);
+  }
+  let trendLine=null;
+  if(state.trend){
+    const pts=c.data.datasets.map(d=>d.data[0]);
+    if(pts.length>=2){
+      const n=pts.length,sx=pts.reduce((a,p)=>a+p.x,0),sy=pts.reduce((a,p)=>a+p.y,0),sxy=pts.reduce((a,p)=>a+p.x*p.y,0),sxx=pts.reduce((a,p)=>a+p.x*p.x,0);
+      const slope=(n*sxy-sx*sy)/(n*sxx-sx*sx||1),int=(sy-slope*sx)/n,xs=c.scales.x,ys=c.scales.y,x1=xs.min,x2=xs.max;
+      trendLine={x1:xs.getPixelForValue(x1),y1:ys.getPixelForValue(slope*x1+int),x2:xs.getPixelForValue(x2),y2:ys.getPixelForValue(slope*x2+int)};
+    }
+  }
+  const boxHitsLine=(bx0,bx1,by0,by1,x1,y1,x2,y2)=>{
+    for(let i=0;i<=6;i++){ const t=i/6, lx=x1+(x2-x1)*t, ly=y1+(y2-y1)*t; if(lx>=bx0&&lx<=bx1&&ly>=by0&&ly<=by1) return true; }
+    return false;
+  };
+  const th=12, DOT_R=7;
+  const dirs=[
+    {dx:0,dy:-1,align:'center',base:'bottom'}, {dx:0,dy:1,align:'center',base:'top'},
+    {dx:1,dy:0,align:'left',base:'middle'}, {dx:-1,dy:0,align:'right',base:'middle'},
+    {dx:0.72,dy:-0.72,align:'left',base:'bottom'}, {dx:-0.72,dy:-0.72,align:'right',base:'bottom'},
+    {dx:0.72,dy:0.72,align:'left',base:'top'}, {dx:-0.72,dy:0.72,align:'right',base:'top'},
+  ];
+  const OFFSETS=[13,18,24,32,42]; // closest first — only step out if nothing at this distance is valid
+  const placed=[];
+  ctx.save(); ctx.fillStyle=PP.text; ctx.font=`600 12px ${BODY}`;
+  c.data.datasets.forEach((d,i)=>{
+    if(!state.highlight.includes(d.pid)) return;
+    const el=c.getDatasetMeta(i).data[0]; if(!el) return;
+    const text=d.label, tw=ctx.measureText(text).width;
+    let winner=null, fallback=null, fallbackScore=-Infinity;
+    ringLoop:
+    for(const OFFSET of OFFSETS){
+      let ringBest=null, ringBestOverlap=Infinity;
+      for(const dir of dirs){
+        const lx=el.x+dir.dx*OFFSET, ly=el.y+dir.dy*OFFSET;
+        const bx0=dir.align==='center'?lx-tw/2:(dir.align==='left'?lx:lx-tw);
+        const bx1=bx0+tw;
+        const by0=dir.base==='middle'?ly-th/2:(dir.base==='bottom'?ly-th:ly);
+        const by1=by0+th;
+        const outOfBounds=bx0<area.left||bx1>area.right||by0<area.top||by1>area.bottom;
+        const overlapsLabel=placed.some(pb=>bx0<pb.x1&&bx1>pb.x0&&by0<pb.y1&&by1>pb.y0);
+        // fallback tracking in case literally nothing ever satisfies the hard rules (extreme crowding)
+        const hardPenalty=(outOfBounds?100000:0)+(overlapsLabel?50000:0);
+        let dotOverlap=0, minPtDist=Infinity;
+        allPts.forEach(p=>{
+          if(p.x===el.x&&p.y===el.y) return;
+          if(p.x>bx0-DOT_R&&p.x<bx1+DOT_R&&p.y>by0-DOT_R&&p.y<by1+DOT_R) dotOverlap++;
+          minPtDist=Math.min(minPtDist,Math.hypot((bx0+bx1)/2-p.x,(by0+by1)/2-p.y));
+        });
+        let lineHits=0;
+        if(quadPx!=null&&bx0<=quadPx&&bx1>=quadPx) lineHits++;
+        if(quadPy!=null&&by0<=quadPy&&by1>=quadPy) lineHits++;
+        if(trendLine&&boxHitsLine(bx0,bx1,by0,by1,trendLine.x1,trendLine.y1,trendLine.x2,trendLine.y2)) lineHits++;
+        const totalOverlap=dotOverlap+lineHits*2; // weight crossing a quad/trend line a bit heavier than one dot
+        const fbScore=minPtDist-hardPenalty-lineHits*500;
+        if(fbScore>fallbackScore){ fallbackScore=fbScore; fallback={dir,lx,ly,bx0,bx1,by0,by1}; }
+        if(outOfBounds||overlapsLabel) continue; // hard constraints — never acceptable at any distance
+        if(totalOverlap<ringBestOverlap){ ringBestOverlap=totalOverlap; ringBest={dir,lx,ly,bx0,bx1,by0,by1}; }
+      }
+      if(ringBest){ winner=ringBest; break ringLoop; } // closest ring with a hard-valid spot wins — stop here
+    }
+    const best=winner||fallback;
+    if(best){ ctx.textAlign=best.dir.align; ctx.textBaseline=best.dir.base; ctx.fillText(text,best.lx,best.ly); placed.push({x0:best.bx0,x1:best.bx1,y0:best.by0,y1:best.by1}); }
+  });
+  ctx.restore();
+}};
+const numLabelPlugin={id:'numlabel',afterDatasetsDraw(c){
+  if(state.type==='bar'&&!state.barNums) return;
+  if(state.type==='donut'&&!state.donutNums&&!state.donutPct) return;
+  const ctx=c.ctx;
+  if(state.type==='bar'){
+    const me=selM()[0]; if(!me) return;
+    const meta=c.getDatasetMeta(0), horiz=state.barOrient==='h';
+    ctx.save(); ctx.fillStyle=PP.text; ctx.font=`700 11px ${BODY}`;
+    ctx.textAlign=horiz?'left':'center'; ctx.textBaseline=horiz?'middle':'bottom';
+    meta.data.forEach((el,i)=>{
+      const v=c.data.datasets[0].data[i]; if(typeof v!=='number') return;
+      const label=fmtNum(v,me.dp);
+      if(horiz) ctx.fillText(label, el.x+6, el.y); else ctx.fillText(label, el.x, el.y-6);
+    });
+    ctx.restore();
+  } else if(state.type==='donut'){
+    const me=selM()[0];
+    const meta=c.getDatasetMeta(0);
+    const vals=c.data.datasets[0].data;
+    const total=vals.reduce((s,v)=>s+(typeof v==='number'?v:0),0);
+    ctx.save(); ctx.font=`700 10.5px ${BODY}`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    meta.data.forEach((el,i)=>{
+      const v=vals[i]; if(typeof v!=='number'||!v) return;
+      const pos=el.tooltipPosition?el.tooltipPosition():{x:el.x,y:el.y};
+      const label=state.donutPct ? `${Math.round(total?v/total*100:0)}%` : fmtNum(v,me?me.dp:0);
+      const tw=ctx.measureText(label).width, padX=6, padY=3, r=8;
+      const bx0=pos.x-tw/2-padX, bx1=pos.x+tw/2+padX, by0=pos.y-padY-6, by1=pos.y+padY+6;
+      ctx.beginPath();
+      ctx.moveTo(bx0+r,by0); ctx.arcTo(bx1,by0,bx1,by1,r); ctx.arcTo(bx1,by1,bx0,by1,r); ctx.arcTo(bx0,by1,bx0,by0,r); ctx.arcTo(bx0,by0,bx1,by0,r);
+      ctx.closePath();
+      ctx.fillStyle=hex(PP.bg,0.88); ctx.fill();
+      ctx.fillStyle=PP.text; ctx.fillText(label,pos.x,pos.y);
+    });
+    ctx.restore();
+  }
+}};
+
+/* ---------- render ---------- */
+// Every metric count from 1 up always has a valid chart type EXCEPT: 0 metrics
+// (nothing selected), 0 players (nothing to plot), or 3+ metrics combined with
+// more than Radar's 6-player cap (the only chart type that fits 3+ metrics).
+function noChartMessage(rec){
+  const n=selM().length, np=plottedPlayers().length;
+  if(np===0) return 'Select at least 1 player to build a graph.';
+  if(n===0) return 'Choose at least 1 metric to build a graph.';
+  if(rec.pick) return null;
+  return `No chart type fits ${n} metrics and ${np} players. Use 6 or fewer players for Radar, or narrow to 2 metrics for Scatter, or 1 metric for Bar.`;
+}
+function render(){
+  const oldType=state.type;
+  const rec=recommend();
+  const readyForAutoLogic = !window.__csEmbed || __csInitApplied; // in embed mode, don't auto-switch type or seed highlights off the initial demo data before the real Compare Stats selection has arrived
+  let justSwitched=false;
+  if(readyForAutoLogic && rec.st[state.type]==='off'&&rec.pick){ switchType(rec.pick); justSwitched=true; reconcileSelForType(); refreshSel(); }
+  if(readyForAutoLogic && state.type==='scatter') seedScatterHighlights(justSwitched || oldType!=='scatter'); // covers any path that lands on scatter (metric edits included), not just cs-init/cs-filtered; forces a proper reseed when freshly arriving so a stale leftover highlight can't masquerade as 'already seeded', but leaves a deliberate existing highlight alone while continuing to browse scatter
+  paintTypes(rec);
+  if(state.type!==oldType) buildDetails(); // keep the Details panel in sync with the active type
+  const setT=(el,txt)=>{if(document.activeElement!==el)el.textContent=txt;};
+  setT(document.getElementById('cTitle'),state.title);
+  const subEl=document.getElementById('cSub');setT(subEl,state.sub);subEl.style.display=(state.sub||document.activeElement===subEl)?'block':'none';
+  // footer
+  const foot=document.getElementById('cFoot'); foot.style.display=state.footShow?'flex':'none';
+  const flEl=document.getElementById('cFootL');
+  let fl=''; if(state.footMode==='auto')fl=autoFooter(); else if(state.footMode==='custom')fl=state.footCustom;
+  if(state.footMode!=='off' && !fl){
+    if(document.activeElement!==flEl){ flEl.textContent='[edit text]'; flEl.classList.add('cf-ph'); }
+  } else { setT(flEl,fl); flEl.classList.remove('cf-ph'); }
+
+  miniCharts.forEach(c=>c.destroy());miniCharts=[]; if(chart){chart.destroy();chart=null;}
+
+  const emptyEl=document.getElementById('chartEmpty');
+  const emptyMsg=noChartMessage(rec);
+  if(emptyMsg){
+    document.getElementById('chart').style.display='none';
+    document.getElementById('multi').style.display='none';
+    emptyEl.style.display='flex';
+    emptyEl.textContent=emptyMsg;
+    updateSetNote();
+    return;
+  }
+  emptyEl.style.display='none';
+
+  const sep=state.type==='radar'&&state.radarSep;
+  document.getElementById('chart').style.display=sep?'none':'block';
+  document.getElementById('multi').style.display=sep?'grid':'none';
+  if(sep){renderSeparate();updateSetNote();return;}
+  if(state.type==='arrow'){ renderArrowChart(); updateSetNote(); return; }
+  const cfg=buildChart();
+  const cv=document.getElementById('chart');
+  if(!cfg){const cx=cv.getContext('2d');cx.clearRect(0,0,cv.width,cv.height);updateSetNote();return;}
+  chart=new Chart(cv.getContext('2d'),Object.assign({},cfg,{plugins:[quadPlugin,trendPlugin,ptLabelPlugin,numLabelPlugin]}));
+  updateSetNote();
+}
+function renderSeparate(){
+  const players=plottedPlayers().slice(0,6),mets=selM(),host=document.getElementById('multi');host.innerHTML='';
+  if(players.length<1||mets.length<3){host.style.display='flex';host.innerHTML='<div style="margin:auto;font-family:'+BODY+';font-style:italic;color:'+PP.sub+'">Pick 1–6 players and 3+ metrics for separate radars.</div>';return;}
+  const cols=Math.min(players.length,3);host.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+  const fns=mets.map(me=>({me,f:normFn(players,me.key)}));
+  const hasHi=state.highlight.length>0;
+  players.forEach((p,i)=>{const cell=document.createElement('div');cell.className='mini';cell.style.cursor='pointer';
+    cell.style.opacity=hasHi&&!state.highlight.includes(p.id)?'0.3':'1';
+    cell.onclick=()=>toggleHighlight(p.id);
+    const lab=document.createElement('div');lab.className='mlab';lab.textContent=p.name;cell.appendChild(lab);
+    const cv=document.createElement('canvas');cell.appendChild(cv);host.appendChild(cell);
+    miniCharts.push(new Chart(cv.getContext('2d'),{type:'radar',data:{labels:mets.map(m=>m.label),datasets:[{data:fns.map(o=>o.f(p)),borderColor:colorOf(p,i),backgroundColor:hex(colorOf(p,i),.18),borderWidth:2,pointRadius:1.5}]},
+      options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:16}},plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{r:{angleLines:{display:state.grid,color:PP.grid},grid:{display:state.grid,color:PP.grid},pointLabels:{color:PP.sub,font:{family:BODY,size:9}},ticks:{display:false,backdropColor:'transparent'},suggestedMin:0,suggestedMax:100}}}}));});
+}
+function autoFooter(){
+  const parts=state.csSentenceParts, mets=selM();
+  if(parts&&mets.length){
+    const metricLabel = mets.length===1 ? mets[0].label : (mets.length===2 ? mets.map(m=>m.label).join(' vs ') : mets.map(m=>m.label).join(', '));
+    const hasManual = state.candidates.some(id=>state.manualIds.has(id));
+    let s=`${metricLabel} for ${parts.subject}`;
+    if(parts.conditions && !hasManual) s+=` [${parts.conditions}]`;
+    const rangeText = state.type==='arrow' ? 'Comparing WC to pre-WC data.' : parts.rangeText;
+    return `${s}. ${rangeText||''}`.trim();
+  }
+  return state.csSentence || '';
+}
+function updateSetNote(){const n=state.sel.length,total=state.candidates.length,cap=capFor(state.type);
+  let t = (cap!==Infinity&&total>cap)?`${n} of ${total} checked (max ${cap} for this chart) — tick which to plot above.`:'';
+  if(state.type==='arrow') t += (t?' ':'') + 'Checked players missing Since WC or WC data for this metric won\u2019t appear on the chart.';
+  document.getElementById('setNote').textContent = t;}
+
+/* ---------- left: selection ---------- */
+function buildSearch(){const inp=document.getElementById('psearch'),res=document.getElementById('presults');
+  const show=()=>{const q=inp.value.trim().toLowerCase();if(!q){res.classList.remove('on');return;}
+    const hits=state.players.filter(p=>!state.candidates.includes(p.id)&&p.name.toLowerCase().includes(q)).slice(0,10);
+    res.innerHTML=hits.map(p=>`<div class="dd-it" data-id="${p.id}">${p.name}<span class="fam">${p.country||''}</span></div>`).join('')||'<div class="dd-it">No matches</div>';
+    res.classList.add('on');res.querySelectorAll('[data-id]').forEach(d=>d.onclick=()=>{
+      const id=d.dataset.id, cap=capFor(state.type);
+      state.candidates.push(id);
+      state.manualIds.add(id);
+      if(cap===Infinity || state.sel.length<cap) state.sel.push(id);
+      inp.value='';res.classList.remove('on');refreshSel();render();
+    });};
+  inp.oninput=show;inp.onfocus=show;}
+function refreshSel(){
+  const cap=capFor(state.type);
+  const atCap=cap!==Infinity && state.sel.length>=cap;
+  const n=state.sel.length, total=state.candidates.length;
+  document.getElementById('selLabel').textContent = (total===0) ? '0 players selected'
+    : (n===total ? n+' player'+(n===1?'':'s')+' selected' : n+' of '+total+' selected');
+  const menu=document.getElementById('selMenu');
+  menu.innerHTML = total ? state.candidates.map(id=>{
+    const p=state.players.find(x=>x.id===id); if(!p) return '';
+    const checked=state.sel.includes(id);
+    const off=!checked&&atCap;
+    const chkTitle=checked?'Remove from graph':(off?`Max ${cap} for this chart type — uncheck one first`:'Add to graph');
+    return `<div class="selrow${off?' selrow-off':''}">
+        <span class="selnm">${p.name}<small>${p.country||''}</small></span>
+        <span class="selchk${checked?' on':''}" data-id="${id}" title="${chkTitle}"></span>
+        <span class="x" data-id="${id}" title="Remove from list">&times;</span>
+      </div>`;
+  }).join('') : '<div class="selrow"><small>No players yet — search above or use Filters.</small></div>';
+  menu.querySelectorAll('.selchk').forEach(el=>{
+    if(el.closest('.selrow').classList.contains('selrow-off')) return;
+    el.onclick=(e)=>{ e.stopPropagation(); toggleSelCheck(el.dataset.id); };
+  });
+  menu.querySelectorAll('.x').forEach(x=>x.onclick=(e)=>{ e.stopPropagation();
+    const id=x.dataset.id;
+    state.candidates=state.candidates.filter(i=>i!==id);
+    state.sel=state.sel.filter(i=>i!==id);
+    state.highlight=state.highlight.filter(i=>i!==id);
+    state.manualIds.delete(id);
+    refreshSel();buildDetails();render();
+  });
+}
+function buildMetricMenu(){const menu=document.getElementById('metMenu');const m=METRICS[state.discipline];
+  const grp=(title,arr)=>`<div class="dd-grp">${title}</div>`+arr.map(me=>`<div class="dd-it ${curMet().includes(me.key)?'on':''}" data-key="${me.key}"><span class="bx"></span>${me.label}<span class="fam">${me.family}</span></div>`).join('');
+  menu.innerHTML=grp('Attribute',m.attribute)+grp('Basic Stats',m.basic)+grp('Advanced Stats',m.advanced);
+  menu.querySelectorAll('[data-key]').forEach(it=>it.onclick=e=>{e.stopPropagation();const k=it.dataset.key;setMet(curMet().includes(k)?curMet().filter(x=>x!==k):curMet().concat(k));state.axisLabels={};if(state.type==='arrow'||state.type==='donut'){reconcileSelForType();refreshSel();}buildMetricMenu();updateMetLabel();buildDetails();render();csNotifyMetrics();});
+}
+function csNotifyMetrics(){ if(window.__csEmbed){ try{ parent.postMessage({type:'cs-metrics',discipline:state.discipline,keys:curMet().slice()},'*'); }catch(e){} } }
+function updateMetLabel(){const labs=selM().map(m=>m.label);document.getElementById('metLabel').textContent=labs.length?labs.join(', '):'Choose metrics…';}
+
+/* ---------- left: details ---------- */
+function buildDetails(){
+  // variant section (chart-specific)
+  const vs=document.getElementById('variantSec');vs.innerHTML='';
+  if(state.type==='bar'){vs.innerHTML='<div class="sec-h"><span>Bar orientation</span></div>';vs.appendChild(segEl('barOrient',[['v','Vertical'],['h','Horizontal']]));}
+  else if(state.type==='donut'){vs.innerHTML='<div class="sec-h"><span>Style</span></div>';const s=segEl('donutCut',[['52%','Donut'],['0%','Pie']]);vs.appendChild(s);}
+  else if(state.type==='radar'){vs.innerHTML='<div class="sec-h"><span>Radar layout</span></div>';vs.appendChild(segBool('radarSep',[['true','Separate'],['false','Overlaid']]));}
+  else if(state.type==='arrow'){
+    vs.innerHTML='<div class="sec-h"><span>Style</span></div>';
+    vs.appendChild(segEl('arrowStyle',[['arrow','Arrow'],['slope','Slope']],()=>{reconcileSelForType();refreshSel();}));
+    if(state.arrowStyle==='arrow'){
+      const lab=document.createElement('div'); lab.className='sec-h'; lab.style.marginTop='9px'; lab.innerHTML='<span>Layout</span>'; vs.appendChild(lab);
+      vs.appendChild(segEl('arrowCols',[['1','Single column'],['2','Side by side']],()=>{reconcileSelForType();refreshSel();}));
+    }
+    const info=document.createElement('div'); info.className='hint2'; info.style.marginTop='10px';
+    const st=arrowStats();
+    if(st){
+      let t=`Comparing <b>${st.me.label}</b> · ${st.rows.length} of ${st.plottedCount} plotted`;
+      if(st.excluded>0) t+=` (${st.excluded} excluded — missing data for one range)`;
+      info.innerHTML=t+'.';
+    } else { info.textContent='Choose a metric to compare.'; }
+    vs.appendChild(info);
+  }
+  // Best/worst-performer selection — only worth showing once there are more candidates
+  // than this chart type can display (otherwise everyone's already shown).
+  if(['bar','radar','arrow'].includes(state.type) && state.candidates.length>capFor(state.type)){
+    const lab=document.createElement('div'); lab.className='sec-h'; lab.style.marginTop='9px'; lab.innerHTML='<span>Players to Show</span>'; vs.appendChild(lab);
+    const seg=document.createElement('div'); seg.className='seg full';
+    seg.innerHTML=['manual','best','worst'].map(v=>`<button data-v="${v}" class="${(state.selRank||'manual')===v?'on':''}">${v==='manual'?'Manual':(v==='best'?'Best':'Worst')}</button>`).join('');
+    seg.onclick=e=>{ const b=e.target.closest('button'); if(!b) return; const v=b.dataset.v;
+      state.selRank = v==='manual' ? null : v;
+      if(v!=='manual') rankAndApply(v);
+      buildDetails(); refreshSel(); render();
+    };
+    vs.appendChild(seg);
+    const hint=document.createElement('div'); hint.className='hint2'; hint.style.marginTop='4px';
+    hint.textContent = state.type==='arrow' ? 'Ranks by size of change (Since WC → WC).' : `Ranks by ${selM().map(m=>m.label).join(' + ')||'the selected metric(s)'}.`;
+    vs.appendChild(hint);
+  } else {
+    state.selRank=null;
+  }
+
+  buildToggles();
+  buildInfo();
+  buildAxis();
+  // scatter section
+  const ss=document.getElementById('scatterSec');
+  if(state.type==='scatter'){ss.style.display='block';
+    ss.innerHTML=`<div class="sec-h"><span>Scatter</span></div>
+      <div class="row"><label>Quadrant lines</label><div class="switch ${state.quadOn?'on':''}" id="tg-quad"></div></div>
+      <div id="quadOpts" style="${state.quadOn?'':'display:none'}">
+        <div class="seg full" id="quadMode" style="margin-bottom:8px"><button data-v="center" class="${state.quadMode==='center'?'on':''}">Centre point</button><button data-v="data" class="${state.quadMode==='data'?'on':''}">Data-derived</button></div>
+        <input class="ti" id="q-tl" placeholder="Top-left label" value="${state.quadLabels.tl}" style="margin-bottom:5px">
+        <input class="ti" id="q-tr" placeholder="Top-right label" value="${state.quadLabels.tr}" style="margin-bottom:5px">
+        <input class="ti" id="q-bl" placeholder="Bottom-left label" value="${state.quadLabels.bl}" style="margin-bottom:5px">
+        <input class="ti" id="q-br" placeholder="Bottom-right label" value="${state.quadLabels.br}">
+      </div>
+      <div class="row" style="margin-top:9px"><label>Trend line</label><div class="switch ${state.trend?'on':''}" id="tg-trend"></div></div>`;
+    ss.querySelector('#tg-quad').onclick=function(){state.quadOn=!state.quadOn;buildDetails();render();};
+    ss.querySelector('#tg-trend').onclick=function(){state.trend=!state.trend;buildDetails();render();};
+    if(state.quadOn){ss.querySelector('#quadMode').onclick=e=>{const b=e.target.closest('button');if(!b)return;state.quadMode=b.dataset.v;buildDetails();render();};
+      ['tl','tr','bl','br'].forEach(k=>{const el=ss.querySelector('#q-'+k);el.oninput=()=>{state.quadLabels[k]=el.value;render();};});}
+  } else ss.style.display='none';
+
+  // colours
+  const cb=document.getElementById('colorBox');cb.innerHTML='';
+  if(state.type==='scatter'){
+    cb.innerHTML=`<div class="hint2">Unselected and highlighted dot colours, plus per-player overrides for highlighted players.</div>`;
+    cb.appendChild(colorControl('Unselected dots',state.dotUnsel,c=>{state.dotUnsel=c;buildDetails();render();},[PP.grey,...PRESETS.slice(1)]));
+    cb.appendChild(colorControl('Highlighted dots',state.dotSel,c=>{state.dotSel=c;buildDetails();render();}));
+    state.highlight.forEach(id=>{const p=state.players.find(x=>x.id===id);if(!p)return;
+      cb.appendChild(playerColorRow(p));});
+    if(!state.highlight.length){const d=document.createElement('div');d.className='hint2';d.textContent='Click dots on the chart to highlight players, then recolour them here.';cb.appendChild(d);}
+  } else if(state.type==='arrow'){
+    cb.innerHTML=`<div class="hint2">Colour shows direction of change (green = improved, red = declined) and isn’t customisable per player here. Drag rows to reorder; click &#9728; to highlight.</div>`;
+    plottedPlayers().forEach(p=>{
+      const row=document.createElement('div'); row.className='pl-color reorder-row'; row.dataset.pid=p.id;
+      const hiOn=state.highlight.includes(p.id);
+      row.innerHTML=`<span class="drag-grip" title="Drag to reorder">⠿</span><span class="nm">${p.name}</span><span class="hi-sun${hiOn?' on':''}" title="${hiOn?'Remove highlight':'Highlight this'}">&#9728;</span>`;
+      row.querySelector('.hi-sun').onclick=(e)=>{ e.stopPropagation(); toggleHighlight(p.id); };
+      cb.appendChild(row);
+    });
+    makeReorderable(cb);
+  } else {
+    const ps=plottedPlayers();if(!ps.length){cb.innerHTML='<div class="hint2">Add players to set their colours.</div>';}
+    else {
+      const d=document.createElement('div'); d.className='hint2';
+      d.textContent = (state.type==='donut'&&ps.length>7) ? 'Drag rows to reorder — the first 7 show individually, the rest group into "Other". Click \u2600 to highlight.' : (state.type==='radar'&&!state.radarSep) ? 'Drag rows to reorder. No highlight mode for overlaid radar.' : 'Drag rows to reorder. Click \u2600 to highlight.';
+      cb.appendChild(d);
+    }
+    const allowHighlight = !(state.type==='radar' && !state.radarSep);
+    ps.forEach((p,i)=>{
+      if(state.type==='donut'&&i===7){ const div=document.createElement('div'); div.className='donut-cutoff'; div.innerHTML='<span>shown above</span><span>grouped as "Other" below</span>'; cb.appendChild(div); }
+      cb.appendChild(playerColorRow(p,allowHighlight));
+    });
+    if(state.type==='donut'&&ps.length>7){
+      cb.appendChild(colorControl('Other',state.colors[OTHER_ID]||PP.grey,c=>{state.colors[OTHER_ID]=c;buildDetails();render();},[PP.grey,...PRESETS.slice(1)],OTHER_ID));
+    }
+    makeReorderable(cb);
+  }
+}
+function segEl(key,opts,onChange){const s=document.createElement('div');s.className='seg full';s.innerHTML=opts.map(([v,l])=>`<button data-v="${v}" class="${state[key]===v?'on':''}">${l}</button>`).join('');
+  s.onclick=e=>{const b=e.target.closest('button');if(!b)return;state[key]=b.dataset.v;if(onChange)onChange();buildDetails();render();};return s;}
+/* per-chart toggle map — only show toggles that actually do something */
+function togglesFor(){const t=state.type;
+  if(t==='bar')return['grid','axis','barNums'];
+  if(t==='scatter')return['grid','axis'];
+  if(t==='radar')return state.radarSep?['grid']:['legend','grid'];
+  if(t==='donut')return['legend','donutNums','donutPct'];
+  if(t==='arrow')return state.arrowStyle==='slope'?['grid','axis','arrowNums']:['grid','axis','arrowNums','arrowBands'];
+  return[];}
+const TOG_LABEL={legend:'Legend',axis:'Axis titles',grid:'Gridlines',barNums:'Value labels',donutNums:'Value labels',donutPct:'Percentage labels',arrowNums:'Value labels',arrowBands:'Row bands'};
+function buildToggles(){const sec=document.getElementById('togSec');const keys=togglesFor();
+  if(!keys.length){sec.innerHTML='';return;}
+  sec.innerHTML='<div class="sec-h"><span>Toggles</span></div>'+keys.map(k=>`<div class="row"><label>${TOG_LABEL[k]}</label><div class="switch ${state[k]?'on':''}" data-tg="${k}"></div></div>`).join('');
+  sec.querySelectorAll('[data-tg]').forEach(el=>el.onclick=function(){
+    const k=this.dataset.tg;
+    state[k]=!state[k];
+    if(state[k] && k==='donutNums') state.donutPct=false;
+    if(state[k] && k==='donutPct') state.donutNums=false;
+    buildToggles(); render();
+  });}
+const INFO={
+  bar:{t:'Bar chart',b:'Each bar is one player’s value for the single chosen metric — taller means higher. Best for comparing one stat across a handful of players. Switch to horizontal in Chart Details when names are long.'},
+  scatter:{t:'Scatter plot',b:'Every player is a dot, placed by two metrics (x and y). The whole set plots in grey — hover to identify a dot, then click it to highlight and label that player. Add quadrant lines (fixed centre or data-derived median) with your own corner labels to carve the field into types, and a trend line to show the overall relationship.'},
+  radar:{t:'Radar',b:'Each spoke is a metric, scaled 0–100 across the group (with a floor so the lowest value still shows, not zero). A bigger enclosed shape = stronger across the board; the shape tells you a player’s balance. “Separate” draws one small radar per player to compare silhouettes side by side; “Overlaid” stacks them on one web.'},
+  donut:{t:'Donut / Pie',b:'Each slice is a player’s share of the combined total for one additive metric (runs, wickets, innings…). Use it for parts-of-a-whole, not for rates or averages where a total has no meaning.'},
+  arrow:{t:'Arrow / Slope',b:'Compares one metric for each player across the two ranges — Since WC and WC. “Arrow” draws one row per player with an arrow from the Since-WC value to the WC value; “Slope” draws two parallel columns connected by a line. Green means the change is an improvement, red a decline (direction depends on whether the metric is better higher or lower). Only rate-style metrics apply — a raw total like Runs would just reflect the very different amount of cricket in each window, not a real change in form. Players missing data for either range are excluded.'}
+};
+function buildInfo(){const i=INFO[state.type];if(!i)return;document.getElementById('infoTitle').textContent='How to read · '+i.t;document.getElementById('infoBody').textContent=i.b;}
+function buildAxis(){const sec=document.getElementById('axisSec');const mets=selM();
+  if(state.type==='scatter'&&mets.length>=1){const mx=mets[0],my=mets[1]||mets[0];
+    sec.innerHTML=`<div class="sec-h"><span>Axis labels</span></div>
+      <input class="ti" id="ax-x" placeholder="${mx.label}" value="${state.axisLabels.x||''}" style="margin-bottom:6px">
+      <input class="ti" id="ax-y" placeholder="${my.label}" value="${state.axisLabels.y||''}">
+      <div class="hint2">Or click an axis title on the chart to rename it.</div>`;
+    sec.querySelector('#ax-x').oninput=e=>{state.axisLabels.x=e.target.value;render();};
+    sec.querySelector('#ax-y').oninput=e=>{state.axisLabels.y=e.target.value;render();};
+  } else if(state.type==='bar'&&mets.length>=1){const me=mets[0];
+    sec.innerHTML=`<div class="sec-h"><span>Axis label</span></div>
+      <input class="ti" id="ax-v" placeholder="${me.label}" value="${state.axisLabels.v||''}">
+      <div class="hint2">Or click the value-axis title on the chart to rename it.</div>`;
+    sec.querySelector('#ax-v').oninput=e=>{state.axisLabels.v=e.target.value;render();};
+  } else if(state.type==='arrow'&&mets.length>=1){const me=mets[0];
+    sec.innerHTML=`<div class="sec-h"><span>Axis label</span></div>
+      <input class="ti" id="ax-arrow" placeholder="${me.label}" value="${state.axisLabels.arrowV||''}">`;
+    sec.querySelector('#ax-arrow').oninput=e=>{state.axisLabels.arrowV=e.target.value;render();};
+  } else sec.innerHTML='';
+}
+function segBool(key,opts){const s=document.createElement('div');s.className='seg full';s.innerHTML=opts.map(([v,l])=>`<button data-v="${v}" class="${String(state[key])===v?'on':''}">${l}</button>`).join('');
+  s.onclick=e=>{const b=e.target.closest('button');if(!b)return;state[key]=b.dataset.v==='true';buildDetails();render();};return s;}
+function colorControl(label,cur,onPick,swatchList,highlightId){
+  const wrap=document.createElement('div');wrap.style.marginBottom='11px';
+  const head=document.createElement('div');head.className='pl-color';head.style.marginBottom='5px';
+  const hiOn=highlightId!=null&&state.highlight.includes(highlightId);
+  head.innerHTML=`<span class="dot" style="background:${cur}"></span><span class="nm">${label}</span>`
+    +(highlightId!=null?`<span class="hi-sun${hiOn?' on':''}" title="${hiOn?'Remove highlight':'Highlight this'}">&#9728;</span>`:'');
+  wrap.appendChild(head);
+  if(highlightId!=null) head.querySelector('.hi-sun').onclick=()=>toggleHighlight(highlightId);
+  const sws=document.createElement('div');sws.className='swatches';
+  (swatchList||PRESETS).forEach(c=>{const b=document.createElement('button');b.className='sw'+(cur&&String(cur).toLowerCase()===c?' on':'');b.style.background=c;b.title=c;b.onclick=()=>onPick(c);sws.appendChild(b);});
+  const g=document.createElement('label');g.className='grad';g.title='Custom colour (full range)';
+  const gi=document.createElement('input');gi.type='color';gi.value=toHex(cur);gi.style.cssText='opacity:0;width:20px;height:20px;position:absolute;top:0;left:0;margin:0;padding:0;cursor:pointer;border:none';gi.onchange=e=>onPick(e.target.value);
+  g.appendChild(gi);sws.appendChild(g);
+  wrap.appendChild(sws);return wrap;
+}
+function playerColorRow(p,allowHighlight){const i=state.sel.indexOf(p.id);const cur=colorOf(p,i<0?0:i);
+  const tc=teamColorFor(p);
+  const swatches=tc?[tc,...PRESETS.slice(1)]:PRESETS;
+  const wrap=colorControl(p.name,cur,c=>{state.colors[p.id]=c;buildDetails();render();},swatches,allowHighlight?p.id:null);
+  wrap.dataset.pid=p.id; wrap.classList.add('reorder-row');
+  const head=wrap.querySelector('.pl-color');
+  if(head){ const grip=document.createElement('span'); grip.className='drag-grip'; grip.title='Drag to reorder'; grip.textContent='⠿'; head.insertBefore(grip,head.firstChild); }
+  return wrap;
+}
+// Drag-and-drop reordering for the Colours section (Bar/Radar/Donut/Arrow). Reorders
+// state.sel to match the new row order — chart drawing order follows state.sel directly.
+function makeReorderable(container){
+  let dragEl=null;
+  const getRows=()=>[...container.querySelectorAll('[data-pid]')];
+  const rowAfter=(y)=>{
+    const rows=getRows().filter(r=>r!==dragEl);
+    return rows.reduce((closest,child)=>{
+      const box=child.getBoundingClientRect();
+      const offset=y-box.top-box.height/2;
+      if(offset<0 && offset>closest.offset) return {offset,element:child};
+      return closest;
+    },{offset:-Infinity,element:null}).element;
+  };
+  const syncFromDOM=()=>{ state.sel=getRows().map(r=>r.dataset.pid); };
+  getRows().forEach(row=>{
+    row.draggable=true;
+    row.ondragstart=e=>{ dragEl=row; row.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; try{e.dataTransfer.setData('text/plain','');}catch(err){} };
+    row.ondragend=()=>{ row.classList.remove('dragging'); dragEl=null; syncFromDOM(); buildDetails(); render(); };
+  });
+  container.ondragover=e=>{
+    e.preventDefault();
+    if(!dragEl) return;
+    const after=rowAfter(e.clientY);
+    if(after==null) container.appendChild(dragEl); else container.insertBefore(dragEl,after);
+    syncFromDOM(); render(); // live-update the chart as rows shift, without tearing down the drag DOM mid-gesture
+  };
+  container.ondrop=e=>{ e.preventDefault(); };
+}
+function toHex(c){if(typeof c==='string'&&c[0]==='#')return c.length===7?c:'#888888';return '#888888';}
+
+/* preset swatch palette appended under colour box for quick apply to last-touched */
+function presetPalette(onPick){const w=document.createElement('div');w.className='swatches';
+  PRESETS.forEach(c=>{const b=document.createElement('button');b.className='sw';b.style.background=c;b.onclick=()=>onPick(c);w.appendChild(b);});
+  const g=document.createElement('label');g.className='grad';const gi=document.createElement('input');gi.type='color';gi.style.cssText='opacity:0;width:0;height:0';gi.onchange=e=>onPick(e.target.value);g.appendChild(gi);w.appendChild(g);
+  return w;}
+
+/* ---------- filters popup ---------- */
+function fillFilterSelects(){
+  const role=document.getElementById('f-role'),hand=document.getElementById('f-hand'),country=document.getElementById('f-country');
+  const uniq=(k)=>[...new Set(state.players.map(p=>p[k]).filter(Boolean))].sort();
+  const fill=(el,vals,allLabel)=>{el.innerHTML=`<option value="">${allLabel}</option>`+vals.map(v=>`<option value="${v}">${v}</option>`).join('');};
+  fill(role,uniq('role'),'All roles');fill(hand,['RHB','LHB'],'All hands');fill(country,uniq('country'),'All countries');
+  role.value=state.filters.role;hand.value=state.filters.hand;country.value=state.filters.country;
+}
+function applyFilters(){
+  state.filters.role=document.getElementById('f-role').value;
+  state.filters.hand=document.getElementById('f-hand').value;
+  state.filters.country=document.getElementById('f-country').value;
+  const matched=state.players.filter(matchFilters);
+  state.candidates=sortByCountry(matched.map(p=>p.id));
+  state.sel=applyCap(state.candidates, capFor(state.type));
+  state.highlight=state.highlight.filter(id=>state.sel.includes(id));
+  document.getElementById('filtersBack').classList.remove('on');
+  refreshSel();buildDetails();render();
+}
+
+/* ---------- wiring ---------- */
+function ddToggle(btnId,menuId){const b=document.getElementById(btnId),m=document.getElementById(menuId);
+  b.onclick=e=>{e.stopPropagation();const open=m.classList.contains('on');document.querySelectorAll('.dd-menu').forEach(x=>x.classList.remove('on'));if(!open)m.classList.add('on');};}
+function init(){
+  document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchToTab(t.dataset.pane));
+  document.getElementById('disc').onclick=e=>{const b=e.target.closest('button');if(!b)return;document.querySelectorAll('#disc button').forEach(x=>x.classList.remove('on'));b.classList.add('on');state.discipline=b.dataset.v;state.axisLabels={};buildMetricMenu();updateMetLabel();buildDetails();render();};
+  ddToggle('metBtn','metMenu');ddToggle('selBtn','selMenu');
+  document.getElementById('metMenu').onclick=e=>e.stopPropagation();
+  document.getElementById('selMenu').onclick=e=>e.stopPropagation();
+  document.addEventListener('click',()=>document.querySelectorAll('.dd-menu').forEach(x=>x.classList.remove('on')));
+  document.getElementById('ctitle').oninput=e=>{state.title=e.target.value;render();};
+  document.getElementById('csub').oninput=e=>{state.sub=e.target.value;render();};
+  document.getElementById('footMode').onclick=e=>{const b=e.target.closest('button');if(!b)return;document.querySelectorAll('#footMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');state.footMode=b.dataset.v;document.getElementById('footCustom').style.display=state.footMode==='custom'?'block':'none';render();};
+  document.getElementById('footCustom').oninput=e=>{state.footCustom=e.target.value;render();};
+  document.getElementById('advBtn').onclick=()=>{ if(window.__csEmbed){ try{ parent.postMessage({type:'cs-openAdvanced',discipline:state.discipline,range:state.range},'*'); }catch(e){} } else { fillFilterSelects();document.getElementById('filtersBack').classList.add('on'); } };
+  document.getElementById('fApply').onclick=applyFilters;
+  document.getElementById('fClear').onclick=()=>{state.filters={role:'',hand:'',country:''};fillFilterSelects();};
+  document.getElementById('filtersBack').onclick=e=>{if(e.target.id==='filtersBack')e.target.classList.remove('on');};
+  document.getElementById('download').onclick=download;
+  document.getElementById('upbtn').onclick=()=>document.getElementById('filein').click();
+  document.getElementById('filein').onchange=e=>{const f=e.target.files[0];if(!f)return;const fr=new FileReader();fr.onload=()=>{try{loadData(adapt(JSON.parse(fr.result)),'data.json');}catch(err){alert('Parse error: '+err.message);}};fr.readAsText(f);};
+  document.getElementById('ctitle').value=state.title;document.getElementById('csub').value=state.sub;
+  // click-to-edit directly on the card
+  const cT=document.getElementById('cTitle'),cS=document.getElementById('cSub'),cF=document.getElementById('cFootL');
+  cT.addEventListener('input',()=>{state.title=cT.textContent;document.getElementById('ctitle').value=cT.textContent;});
+  cS.addEventListener('input',()=>{state.sub=cS.textContent;document.getElementById('csub').value=cS.textContent;});
+  cF.addEventListener('focus',()=>{if(state.footMode!=='custom'){state.footCustom=autoFooter();state.footMode='custom';document.querySelectorAll('#footMode button').forEach(x=>x.classList.toggle('on',x.dataset.v==='custom'));const fc=document.getElementById('footCustom');fc.style.display='block';fc.value=state.footCustom;cF.textContent=state.footCustom;}});
+  cF.addEventListener('input',()=>{state.footCustom=cF.textContent;document.getElementById('footCustom').value=cF.textContent;});
+  [['cTitle','[Title]'],['cSub','[Subtitle]']].forEach(([id,ph])=>document.getElementById(id).addEventListener('focus',function(){if(this.textContent===ph){const r=document.createRange();r.selectNodeContents(this);const s=getSelection();s.removeAllRanges();s.addRange(r);}}));
+  setupAxisEdit();
+  buildSearch();
+}
+function setupAxisEdit(){
+  const cv=document.getElementById('chart'), inp=document.getElementById('axisEdit');
+  cv.addEventListener('click',e=>{
+    if(state.type==='arrow'){
+      const x=e.offsetX,y=e.offsetY;
+      const hit=arrowHitAreas.find(a=>a.test(x,y));
+      if(hit) toggleHighlight(hit.id);
+      return;
+    }
+    if(state.type==='bar'&&chart&&chart.chartArea){
+      const x=e.offsetX,y=e.offsetY,H=cv.clientHeight,area=chart.chartArea,horiz=state.barOrient==='h';
+      const inGutter = horiz ? (x<area.left && y<H-30) : (y>area.bottom && x>32);
+      if(inGutter){
+        const meta=chart.getDatasetMeta(0), pl=plottedPlayers();
+        let best=null,bestDist=Infinity;
+        meta.data.forEach((el,i)=>{ const d=horiz?Math.abs(el.y-y):Math.abs(el.x-x); if(d<bestDist){bestDist=d;best=i;} });
+        if(best!=null&&bestDist<24&&pl[best]){ toggleHighlight(pl[best].id); return; }
+      }
+    }
+    if(!chart||!chart.chartArea)return; const t=state.type; if(t==='radar'||t==='donut')return;
+    const x=e.offsetX,y=e.offsetY,W=cv.clientWidth,H=cv.clientHeight; let key=null;
+    const bottom=y>H-30, left=x<32;
+    if(t==='scatter'){if(bottom)key='x';else if(left)key='y';}
+    else if(t==='bar'){if(state.barOrient==='h'){if(bottom)key='v';}else{if(left)key='v';}}
+    if(!key)return; e.stopPropagation();
+    const mets=selM();const def=key==='y'?((mets[1]||mets[0])||{}).label:(mets[0]||{}).label;
+    inp.value=state.axisLabels[key]||def||''; inp.dataset.key=key;
+    inp.style.left=Math.min(Math.max(x-72,4),W-152)+'px'; inp.style.top=Math.min(Math.max(y-13,4),H-30)+'px';
+    inp.style.width='148px'; inp.style.display='block'; inp.focus(); inp.select();
+  });
+  const commit=()=>{if(inp.style.display==='none')return;state.axisLabels[inp.dataset.key]=inp.value;inp.style.display='none';buildDetails();render();};
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit();}else if(e.key==='Escape'){inp.style.display='none';}});
+  inp.addEventListener('blur',commit);
+}
+function download(){
+  if(state.title==='[Title]'||state.sub==='[Subtitle]'||!state.title||!state.sub){
+    if(!confirm('You haven’t set a title and/or sub-header yet — the chart will download with the placeholder “[Title]” / “[Subtitle]” text. Download anyway?'))return;
+  }
+  const card=document.getElementById('card');
+  const flEl=document.getElementById('cFootL'); const wasPh=flEl.classList.contains('cf-ph'); const phText=flEl.textContent;
+  if(wasPh){ flEl.textContent=''; }
+  html2canvas(card,{scale:2,backgroundColor:null,logging:false}).then(cv=>{const a=document.getElementById('dllink');a.href=cv.toDataURL('image/png');a.download=(state.title||'chart').replace(/[^\w]+/g,'_')+'_best_of_cricket.png';a.click(); if(wasPh){flEl.textContent=phText;}});}
+function loadData(players,label){state.players=players;state.candidates=players.slice(0,5).map(p=>p.id);state.sel=state.candidates.slice();state.highlight=[];state.colors={};state.filters={role:'',hand:'',country:''};state.axisLabels={};
+  state.metrics={batting:['batting_sr','batting_average'],bowling:['economy','wickets']};
+  document.getElementById('datasrc').textContent=label+' · '+players.length+' players';
+  refreshSel();buildMetricMenu();updateMetLabel();buildDetails();render();}
+
+init();
+
+/* ---------- Compare Stats embed bridge ---------- */
+window.__csEmbed = (function(){try{return window.parent && window.parent!==window;}catch(e){return false;}})();
+let __csPendingInit=null, __csDataReady=false, __csInitApplied=false;
+function csUsable(keys){ return (keys||[]).filter(k=>!!mByKey(k)); } // keep only chartable numeric metrics, preserve order
+function csPickType(n){ return n>=3?'radar':(n===2?'scatter':'bar'); }
+function seedScatterHighlights(force){
+  if(state.type!=='scatter') return;
+  if(!force) return; // already had our one chance to auto-seed — from here on, highlights are fully manual (can be cleared to zero and stay there)
+  state.highlight=[]; // landing on scatter fresh — discard any incidental leftover and guarantee a real pair
+  const pool=state.sel.slice();
+  if(pool.length<2) return;
+  // pick two distinct players at random, give them two distinct preset colours
+  const i=Math.floor(Math.random()*pool.length); let j=Math.floor(Math.random()*pool.length);
+  if(j===i) j=(i+1)%pool.length;
+  state.highlight=[pool[i],pool[j]];
+  state.colors[pool[i]]=PRESETS[0]; state.colors[pool[j]]=PRESETS[1];
+}
+function applyTheme(t){
+  if(t!=='light'&&t!=='dark') return;
+  document.documentElement.setAttribute('data-theme',t);
+}
+function csApplyInit(msg){
+  if(!__csDataReady){ __csPendingInit=msg; return; }
+  applyTheme(msg.theme);
+  if(msg.discipline==='batting'||msg.discipline==='bowling'){
+    state.discipline=msg.discipline;
+    document.querySelectorAll('#disc button').forEach(x=>x.classList.toggle('on',x.dataset.v===msg.discipline));
+  }
+  if(msg.range==='pre'||msg.range==='wc'){
+    state.range=msg.range; // no local UI for this anymore — range now only changes via the shared Advanced filters popup
+  }
+  state.axisLabels={};
+  state.csSentence = (typeof msg.sentence==='string') ? msg.sentence : '';
+  state.csSentenceParts = (msg.sentenceParts&&typeof msg.sentenceParts==='object') ? msg.sentenceParts : null;
+  if(Array.isArray(msg.playerIds)){
+    const valid=msg.playerIds.filter(id=>state.players.some(p=>p.id===id));
+    if(valid.length){ state.candidates=sortByCountry(valid); state.sel=state.candidates.slice(); state.highlight=state.highlight.filter(id=>state.candidates.includes(id)); state.manualIds=new Set(); }
+  }
+  // default metric + chart-type rule — advanced filter conditions take priority (the user is
+  // actively filtering on these), then Compare Stats' highlighted / sorted columns
+  const advKeys=csUsable(msg.advMetricKeys);
+  const hi=csUsable(msg.highlight);
+  const sortOk=(msg.sortKey&&mByKey(msg.sortKey))?msg.sortKey:null;
+  const oneType=(k)=>{ const me=mByKey(k); return (me&&me.family==='total'&&state.candidates.length<=CAPS.donut) ? 'donut' : 'bar'; };
+  let mets=null,type=null;
+  if(advKeys.length){ mets=advKeys.slice(0,3); type=(mets.length===1)?oneType(mets[0]):csPickType(mets.length); }
+  else if(hi.length>=4){ const k=(sortOk&&hi.includes(sortOk))?sortOk:hi[0]; mets=[k]; type=oneType(k); }
+  else if(hi.length>=1){ mets=hi.slice(0,3); type=(mets.length===1)?oneType(mets[0]):csPickType(mets.length); }
+  else if(sortOk){ mets=[sortOk]; type=oneType(sortOk); }
+  if(mets){ setMet(mets); switchType(type); }
+  else { const rec=recommend(); switchType(rec.pick||'bar'); }   // neither: fall back to count/type recommendation
+  state.sel=applyCap(state.candidates, capFor(state.type));   // keep Compare Stats order; full list still lives in candidates
+  seedScatterHighlights(true);
+  __csInitApplied=true;
+  refreshSel(); buildMetricMenu(); updateMetLabel(); buildDetails(); render();
+}
+window.addEventListener('message',e=>{
+  const m=e.data; if(!m||typeof m!=='object') return;
+  if(m.type==='cs-init') csApplyInit(m);
+  else if(m.type==='cs-theme') applyTheme(m.theme);
+  else if(m.type==='cs-filtered' && Array.isArray(m.playerIds)){
+    if(typeof m.sentence==='string') state.csSentence=m.sentence;
+    if(m.sentenceParts&&typeof m.sentenceParts==='object') state.csSentenceParts=m.sentenceParts;
+    if((m.discipline==='batting'||m.discipline==='bowling') && m.discipline!==state.discipline){
+      state.discipline=m.discipline; state.axisLabels={};
+      document.querySelectorAll('#disc button').forEach(x=>x.classList.toggle('on',x.dataset.v===m.discipline));
+    }
+    if(m.range==='pre'||m.range==='wc'){ state.range=m.range; }
+    const valid=m.playerIds.filter(id=>state.players.some(p=>p.id===id));
+    state.candidates=sortByCountry(valid);
+    state.manualIds=new Set();
+    state.sel=applyCap(state.candidates, capFor(state.type));
+    state.highlight=state.highlight.filter(id=>state.sel.includes(id));
+    const advKeys=csUsable(m.advMetricKeys);
+    if(advKeys.length){
+      const oneType=(k)=>{ const me=mByKey(k); return (me&&me.family==='total'&&state.candidates.length<=CAPS.donut) ? 'donut' : 'bar'; };
+      const mets=advKeys.slice(0,3);
+      setMet(mets); switchType(mets.length===1?oneType(mets[0]):csPickType(mets.length));
+      state.sel=applyCap(state.candidates, capFor(state.type)); // re-cap in case the type just changed
+    }
+    seedScatterHighlights();
+    refreshSel(); buildMetricMenu(); updateMetLabel(); buildDetails(); render();
+  }
+});
+function csReady(){ __csDataReady=true; if(window.__csEmbed){try{parent.postMessage({type:'cs-graph-ready'},'*');}catch(e){}} if(__csPendingInit){const p=__csPendingInit;__csPendingInit=null;csApplyInit(p);} }
+window.csGraphDebug=()=>({type:state.type,mets:curMet(),sel:state.sel.length,selIds:state.sel.slice(),candidates:state.candidates.length,players:state.players.length,disc:state.discipline,range:state.range,highlight:state.highlight.length,colors:Object.keys(state.colors).length,footL:(document.getElementById('cFootL')||{}).textContent,footPh:(document.getElementById('cFootL')||{classList:{contains:()=>false}}).classList.contains('cf-ph'),footMode:state.footMode,activeElId:document.activeElement&&document.activeElement.id,activeElTag:document.activeElement&&document.activeElement.tagName});
+window.csAnyDropdownOpen=()=>!!document.querySelector('.dd-menu.on');
+window.csCloseDropdowns=()=>document.querySelectorAll('.dd-menu').forEach(x=>x.classList.remove('on'));
+window.csClearHighlights=()=>{ state.highlight.slice().forEach(id=>toggleHighlight(id)); };
+
+fetch('data.json').then(r=>{if(!r.ok)throw 0;return r.json();}).then(j=>{loadData(adapt(j),'data.json (auto-loaded)');csReady();}).catch(()=>{loadData(sampleData(),'sample data');csReady();});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>render());
+})();
+</script>
+</body>
+</html>
