@@ -1858,6 +1858,17 @@
     document.body.classList.add("ov-open");
     if (window.track) track("compare_stats_open");
   };
+  // Header shortcut: jumps straight to the graph builder. Opens Compare Stats first (same
+  // setup openCompareStats() does — builds the modal, runs the default filter) so the graph
+  // has a real player set to read, then immediately shows the graph view on top; both DOM
+  // updates land in the same tick, so there's no visible flash of the table underneath.
+  // Everything else (the graph's own "Compare Stats" back-button, advanced filters, theme
+  // sync) is the same shared state regardless of entry point, so it all continues to work.
+  window.openGraphDirect = function () {
+    openCompareStats();
+    openGraphView();
+    if (window.track) track("graph_open_direct");
+  };
   window.closeCompareStats = function () {
     const bd = document.getElementById("cs-backdrop");
     if (bd) bd.classList.remove("show");
