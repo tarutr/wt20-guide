@@ -317,7 +317,8 @@ const state = {
   legend:true, axis:true, grid:true,
   quadOn:false, quadMode:'data', quadLabels:{tl:'',tr:'',bl:'',br:''}, trend:false,
   dotUnsel:PP.grey, dotSel:'#c9372c',
-  filters:{role:'',hand:'',country:''}, csSentence:'', csSentenceParts:null, manualIds:new Set()
+  filters:{role:'',hand:'',country:''}, csSentence:'', csSentenceParts:null, manualIds:new Set(),
+  labelOffsets:{} // scatter only: pid -> {dx,dy} manual drag offset from the dot, overrides auto-placement
 };
 let chart=null, miniCharts=[];
 
@@ -525,10 +526,17 @@ function buildChart(){
     sc.y.title={display:state.axis,text:axLab('y',my.label),color:PP.sub,font:chartFont(13,{weight:'600'})};
     sc.x.grace='4%'; sc.y.grace='5%';
     const ds=players.map((p,i)=>{const on=state.highlight.includes(p.id);
-      return {label:p.name,data:[{x:xv[i],y:yv[i]}],pid:p.id,backgroundColor:on?(state.colors[p.id]||state.dotSel):state.dotUnsel,borderColor:on?'#fff':'transparent',borderWidth:on?1.5:0,pointRadius:on?8:6,pointHoverRadius:10};});
+      // Chart.js draws datasets sorted by `order`, and its _drawDatasets loop iterates that
+      // sorted list IN REVERSE — so the HIGHER the order value, the earlier (further back) a
+      // dataset paints. Give highlighted dots a LOW order so they paint last = on top; grey
+      // dots get a high order so they paint first = behind. This is what actually brings
+      // highlighted dots to the forefront (array position alone does not, because of the
+      // reversed draw loop + drawActiveElementsOnTop interactions).
+      return {label:p.name,data:[{x:xv[i],y:yv[i]}],pid:p.id,order:on?0:1,
+        backgroundColor:on?(state.colors[p.id]||state.dotSel):state.dotUnsel,borderColor:on?'#fff':'transparent',borderWidth:on?1.5:0,pointRadius:on?8:6,pointHoverRadius:10};});
     return {type:'scatter',data:{datasets:ds},
       options:commonOpts({plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label}}},scales:sc,
-        onClick:(e,els,ch)=>{if(!els.length)return;const pid=ch.data.datasets[els[0].datasetIndex].pid;
+        onClick:(e,els,ch)=>{if(window.__scatterLabelDidDrag&&window.__scatterLabelDidDrag())return;if(!els.length)return;const pid=ch.data.datasets[els[0].datasetIndex].pid;
           state.highlight=state.highlight.includes(pid)?state.highlight.filter(x=>x!==pid):state.highlight.concat(pid);buildDetails();render();}})};
   }
   if(t==='radar'){const fns=mets.map(me=>({me,f:normFn(players,me.key)}));
@@ -563,13 +571,16 @@ function switchToTab(pane){
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+pane));
 }
 function toggleHighlight(id){
-  state.highlight = state.highlight.includes(id) ? state.highlight.filter(x=>x!==id) : state.highlight.concat(id);
+  const wasOn=state.highlight.includes(id);
+  state.highlight = wasOn ? state.highlight.filter(x=>x!==id) : state.highlight.concat(id);
+  if(wasOn) delete state.labelOffsets[id]; // dragged position for a label only matters while it's shown
   buildDetails(); render();
 }
 function switchType(newType){
   if(newType===state.type) return;
   state.type=newType;
   state.highlight=[]; // highlights are chart-type-specific — never carry over across a type switch
+  state.labelOffsets={}; // manual label drags are scatter-specific — never carry over across a type switch
 }
 function bs(me,me2){const s=baseScales();const valAx=state.barOrient==='h'?'x':'y';const catAx=state.barOrient==='h'?'y':'x';
   s[valAx].title={display:state.axis,text:axLab('v',me.label),color:PP.sub,font:chartFont(13,{weight:'600'})};
@@ -871,11 +882,26 @@ const ptLabelPlugin={id:'ptlabel',afterDatasetsDraw(c){
   ];
   const OFFSETS=[13,18,24,32,42]; // closest first — only step out if nothing at this distance is valid
   const placed=[];
+  window.__scatterLabelBoxes=window.__scatterLabelBoxes||{}; // pid -> box, used for drag hit-testing
+  const boxesThisFrame={};
   ctx.save(); ctx.fillStyle=PP.text; ctx.font=`600 12px ${BODY}`;
   c.data.datasets.forEach((d,i)=>{
     if(!state.highlight.includes(d.pid)) return;
     const el=c.getDatasetMeta(i).data[0]; if(!el) return;
     const text=d.label, tw=ctx.measureText(text).width;
+    // Manual drag override: if the user has dragged this label, honor that position exactly
+    // and skip the auto-placement search entirely. Still registers in `placed` so other
+    // (non-dragged) labels steer around it.
+    const manual=state.labelOffsets[d.pid];
+    if(manual){
+      const lx=el.x+manual.dx, ly=el.y+manual.dy;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(text,lx,ly);
+      const bx0=lx-tw/2-4, bx1=lx+tw/2+4, by0=ly-th/2-3, by1=ly+th/2+3;
+      placed.push({x0:bx0,x1:bx1,y0:by0,y1:by1});
+      boxesThisFrame[d.pid]={x0:bx0,x1:bx1,y0:by0,y1:by1,dotX:el.x,dotY:el.y,cx:lx,cy:ly};
+      return;
+    }
     let winner=null, fallback=null, fallbackScore=-Infinity;
     ringLoop:
     for(const OFFSET of OFFSETS){
@@ -888,30 +914,41 @@ const ptLabelPlugin={id:'ptlabel',afterDatasetsDraw(c){
         const by1=by0+th;
         const outOfBounds=bx0<area.left||bx1>area.right||by0<area.top||by1>area.bottom;
         const overlapsLabel=placed.some(pb=>bx0<pb.x1&&bx1>pb.x0&&by0<pb.y1&&by1>pb.y0);
+        // Small clearance around quad/trend lines so a label counts as "hitting" the line
+        // even if it's just grazing it — a label pressed right up against a dashed line
+        // reads as badly as crossing it.
+        const LINE_CLEARANCE=3;
+        let lineHits=0;
+        if(quadPx!=null&&bx0-LINE_CLEARANCE<=quadPx&&bx1+LINE_CLEARANCE>=quadPx) lineHits++;
+        if(quadPy!=null&&by0-LINE_CLEARANCE<=quadPy&&by1+LINE_CLEARANCE>=quadPy) lineHits++;
+        if(trendLine&&boxHitsLine(bx0-LINE_CLEARANCE,bx1+LINE_CLEARANCE,by0-LINE_CLEARANCE,by1+LINE_CLEARANCE,trendLine.x1,trendLine.y1,trendLine.x2,trendLine.y2)) lineHits++;
         // fallback tracking in case literally nothing ever satisfies the hard rules (extreme crowding)
-        const hardPenalty=(outOfBounds?100000:0)+(overlapsLabel?50000:0);
+        const hardPenalty=(outOfBounds?100000:0)+(overlapsLabel?50000:0)+(lineHits?20000:0);
         let dotOverlap=0, minPtDist=Infinity;
         allPts.forEach(p=>{
           if(p.x===el.x&&p.y===el.y) return;
           if(p.x>bx0-DOT_R&&p.x<bx1+DOT_R&&p.y>by0-DOT_R&&p.y<by1+DOT_R) dotOverlap++;
           minPtDist=Math.min(minPtDist,Math.hypot((bx0+bx1)/2-p.x,(by0+by1)/2-p.y));
         });
-        let lineHits=0;
-        if(quadPx!=null&&bx0<=quadPx&&bx1>=quadPx) lineHits++;
-        if(quadPy!=null&&by0<=quadPy&&by1>=quadPy) lineHits++;
-        if(trendLine&&boxHitsLine(bx0,bx1,by0,by1,trendLine.x1,trendLine.y1,trendLine.x2,trendLine.y2)) lineHits++;
-        const totalOverlap=dotOverlap+lineHits*2; // weight crossing a quad/trend line a bit heavier than one dot
-        const fbScore=minPtDist-hardPenalty-lineHits*500;
+        const fbScore=minPtDist-hardPenalty;
         if(fbScore>fallbackScore){ fallbackScore=fbScore; fallback={dir,lx,ly,bx0,bx1,by0,by1}; }
-        if(outOfBounds||overlapsLabel) continue; // hard constraints — never acceptable at any distance
-        if(totalOverlap<ringBestOverlap){ ringBestOverlap=totalOverlap; ringBest={dir,lx,ly,bx0,bx1,by0,by1}; }
+        // Hard constraints — never acceptable at any distance. A quad/trend line crossing is
+        // now treated the same as overlapping another label: only accepted as a last-resort
+        // fallback if truly nothing else on the canvas is free.
+        if(outOfBounds||overlapsLabel||lineHits) continue;
+        if(dotOverlap<ringBestOverlap){ ringBestOverlap=dotOverlap; ringBest={dir,lx,ly,bx0,bx1,by0,by1}; }
       }
       if(ringBest){ winner=ringBest; break ringLoop; } // closest ring with a hard-valid spot wins — stop here
     }
     const best=winner||fallback;
-    if(best){ ctx.textAlign=best.dir.align; ctx.textBaseline=best.dir.base; ctx.fillText(text,best.lx,best.ly); placed.push({x0:best.bx0,x1:best.bx1,y0:best.by0,y1:best.by1}); }
+    if(best){
+      ctx.textAlign=best.dir.align; ctx.textBaseline=best.dir.base; ctx.fillText(text,best.lx,best.ly);
+      placed.push({x0:best.bx0,x1:best.bx1,y0:best.by0,y1:best.by1});
+      boxesThisFrame[d.pid]={x0:best.bx0,x1:best.bx1,y0:best.by0,y1:best.by1,dotX:el.x,dotY:el.y,cx:(best.bx0+best.bx1)/2,cy:(best.by0+best.by1)/2};
+    }
   });
   ctx.restore();
+  window.__scatterLabelBoxes=boxesThisFrame;
 }};
 const numLabelPlugin={id:'numlabel',afterDatasetsDraw(c){
   if(state.type==='bar'&&!state.barNums) return;
@@ -1146,9 +1183,12 @@ function buildDetails(){
         <input class="ti" id="q-bl" placeholder="Bottom-left label" value="${state.quadLabels.bl}" style="margin-bottom:5px">
         <input class="ti" id="q-br" placeholder="Bottom-right label" value="${state.quadLabels.br}">
       </div>
-      <div class="row" style="margin-top:9px"><label>Trend line</label><div class="switch ${state.trend?'on':''}" id="tg-trend"></div></div>`;
+      <div class="row" style="margin-top:9px"><label>Trend line</label><div class="switch ${state.trend?'on':''}" id="tg-trend"></div></div>
+      <div class="hint2" style="margin-top:9px">Drag any highlighted player's name on the chart to reposition it.</div>
+      <button class="btn" id="resetLabels" style="margin-top:6px;width:100%">Reset label positions</button>`;
     ss.querySelector('#tg-quad').onclick=function(){state.quadOn=!state.quadOn;buildDetails();render();};
     ss.querySelector('#tg-trend').onclick=function(){state.trend=!state.trend;buildDetails();render();};
+    ss.querySelector('#resetLabels').onclick=function(){state.labelOffsets={};render();};
     if(state.quadOn){ss.querySelector('#quadMode').onclick=e=>{const b=e.target.closest('button');if(!b)return;state.quadMode=b.dataset.v;buildDetails();render();};
       ['tl','tr','bl','br'].forEach(k=>{const el=ss.querySelector('#q-'+k);el.oninput=()=>{state.quadLabels[k]=el.value;render();};});}
   } else ss.style.display='none';
@@ -1159,8 +1199,15 @@ function buildDetails(){
     cb.innerHTML=`<div class="hint2">Unselected and highlighted dot colours, plus per-player overrides for highlighted players.</div>`;
     cb.appendChild(colorControl('Unselected dots',state.dotUnsel,c=>{state.dotUnsel=c;buildDetails();render();},[PP.grey,...PRESETS.slice(1)]));
     cb.appendChild(colorControl('Highlighted dots',state.dotSel,c=>{state.dotSel=c;buildDetails();render();}));
+    const bulkRow=document.createElement('div'); bulkRow.style.cssText='display:flex;gap:8px;margin:2px 0 11px';
+    const unselAllBtn=document.createElement('button'); unselAllBtn.className='btn'; unselAllBtn.style.flex='1'; unselAllBtn.textContent='Unhighlight all';
+    unselAllBtn.onclick=()=>{ state.highlight=[]; state.labelOffsets={}; buildDetails(); render(); };
+    const selAllBtn=document.createElement('button'); selAllBtn.className='btn'; selAllBtn.style.flex='1'; selAllBtn.textContent='Highlight all';
+    selAllBtn.onclick=()=>{ state.highlight=plottedPlayers().map(p=>p.id); buildDetails(); render(); };
+    bulkRow.appendChild(unselAllBtn); bulkRow.appendChild(selAllBtn);
+    cb.appendChild(bulkRow);
     state.highlight.forEach(id=>{const p=state.players.find(x=>x.id===id);if(!p)return;
-      cb.appendChild(playerColorRow(p));});
+      cb.appendChild(playerColorRow(p,true));});
     if(!state.highlight.length){const d=document.createElement('div');d.className='hint2';d.textContent='Click dots on the chart to highlight players, then recolour them here.';cb.appendChild(d);}
   } else if(state.type==='arrow'){
     cb.innerHTML=`<div class="hint2">Colour shows direction of change (green = improved, red = declined) and isn’t customisable per player here. Drag rows to reorder; click &#9728; to highlight.</div>`;
@@ -1353,9 +1400,62 @@ function init(){
   setupAxisEdit();
   buildSearch();
 }
+function setupScatterLabelDrag(){
+  const cv=document.getElementById('chart');
+  let dragging=null; // {pid, startX, startY, baseDx, baseDy}
+  let didDrag=false;
+  cv.addEventListener('mousedown',e=>{
+    if(state.type!=='scatter') return;
+    const boxes=window.__scatterLabelBoxes||{};
+    const x=e.offsetX,y=e.offsetY;
+    for(const pid in boxes){
+      const b=boxes[pid];
+      if(x>=b.x0&&x<=b.x1&&y>=b.y0&&y<=b.y1){
+        const cur=state.labelOffsets[pid]||{dx:b.cx-b.dotX,dy:b.cy-b.dotY};
+        dragging={pid,startX:x,startY:y,baseDx:cur.dx,baseDy:cur.dy};
+        didDrag=false;
+        e.preventDefault(); e.stopPropagation();
+        cv.style.cursor='grabbing';
+        break;
+      }
+    }
+  });
+  window.addEventListener('mousemove',e=>{
+    if(!dragging) return;
+    const rect=cv.getBoundingClientRect();
+    const x=e.clientX-rect.left, y=e.clientY-rect.top;
+    if(Math.abs(x-dragging.startX)>2||Math.abs(y-dragging.startY)>2) didDrag=true;
+    state.labelOffsets[dragging.pid]={dx:dragging.baseDx+(x-dragging.startX),dy:dragging.baseDy+(y-dragging.startY)};
+    if(chart) chart.draw();
+  });
+  window.addEventListener('mouseup',()=>{
+    if(dragging){ dragging=null; cv.style.cursor=''; buildDetails(); }
+    // Reset on a short delay so the click event that immediately follows this mouseup
+    // (same gesture) still sees didDrag=true and gets swallowed, but the NEXT unrelated
+    // click isn't permanently blocked. Without this, one label drag would silently break
+    // every future click-to-highlight/unhighlight for the rest of the session.
+    setTimeout(()=>{ didDrag=false; },0);
+  });
+  // hover affordance
+  cv.addEventListener('mousemove',e=>{
+    if(state.type!=='scatter'||dragging) return;
+    const boxes=window.__scatterLabelBoxes||{};
+    const x=e.offsetX,y=e.offsetY;
+    const over=Object.values(boxes).some(b=>x>=b.x0&&x<=b.x1&&y>=b.y0&&y<=b.y1);
+    cv.style.cursor=over?'grab':'';
+  });
+  window.__scatterLabelDidDrag=()=>didDrag;
+}
 function setupAxisEdit(){
   const cv=document.getElementById('chart'), inp=document.getElementById('axisEdit');
+  setupScatterLabelDrag();
   cv.addEventListener('click',e=>{
+    if(state.type==='scatter'&&window.__scatterLabelDidDrag&&window.__scatterLabelDidDrag()){
+      // a drag just completed on this same mouseup->click sequence — don't let it also
+      // toggle/untoggle a dot's highlight underneath the label
+      e.stopImmediatePropagation();
+      return;
+    }
     if(state.type==='arrow'){
       const x=e.offsetX,y=e.offsetY;
       const hit=arrowHitAreas.find(a=>a.test(x,y));
@@ -1394,7 +1494,7 @@ function download(){
   const card=document.getElementById('card');
   const flEl=document.getElementById('cFootL'); const wasPh=flEl.classList.contains('cf-ph'); const phText=flEl.textContent;
   if(wasPh){ flEl.textContent=''; }
-  html2canvas(card,{scale:2,backgroundColor:null,logging:false}).then(cv=>{const a=document.getElementById('dllink');a.href=cv.toDataURL('image/png');a.download=(state.title||'chart').replace(/[^\w]+/g,'_')+'_best_of_cricket.png';a.click(); if(wasPh){flEl.textContent=phText;}});}
+  html2canvas(card,{scale:2,backgroundColor:null,logging:false}).then(cv=>{const a=document.getElementById('dllink');a.href=cv.toDataURL('image/png');a.download=(state.title||'chart').replace(/[^\w]+/g,'_')+'_Best_of_Cricket.png';a.click(); if(wasPh){flEl.textContent=phText;}});}
 function loadData(players,label){state.players=players;state.candidates=players.slice(0,5).map(p=>p.id);state.sel=state.candidates.slice();state.highlight=[];state.colors={};state.filters={role:'',hand:'',country:''};state.axisLabels={};
   state.metrics={batting:['batting_sr','batting_average'],bowling:['economy','wickets']};
   document.getElementById('datasrc').textContent=label+' · '+players.length+' players';
