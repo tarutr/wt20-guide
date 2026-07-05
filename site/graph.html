@@ -344,6 +344,20 @@ function axLab(key,def){const v=state.axisLabels[key];return(v!=null&&v!=='')?v:
 function val(p,key){const m=mByKey(key);if(m&&m.src==='graph')return p.graph&&typeof p.graph[key]==='number'?p.graph[key]:null;if(key==='age')return typeof p.age==='number'?p.age:null;const o=(state.range==='wc'?p.wc:p.pre)||{};const v=o[key];if(v==null&&m&&m.family==='total')return 0;return typeof v==='number'?v:null;}
 function matchFilters(p){const f=state.filters;if(f.role&&p.role!==f.role)return false;if(f.hand&&p.hand!==f.hand)return false;if(f.country&&p.country!==f.country)return false;return true;}
 function plottedPlayers(){return state.sel.map(id=>state.players.find(p=>p.id===id)).filter(Boolean);}
+// Players ACTUALLY drawable on the current chart: those in the selection who have real data for
+// the metric(s) this chart type uses. This is what stops empty rows/slices for players who lack
+// the selected stat (e.g. a bowler with no Powerplay SR on a batting bar). Bar/donut/pie need
+// the one metric; radar needs all its axes; scatter needs both; arrow needs a pre+wc pair. The
+// player stays SELECTED (so switching to a metric they do have brings them back) — they're just
+// not plotted or described while they have no data for the current metric.
+function chartHasData(p){
+  const mets=selM(); if(!mets.length) return false;
+  if(state.type==='arrow') return hasMetricData(p,[mets[0]],true);
+  if(state.type==='scatter') return hasMetricData(p,mets.slice(0,2),false);
+  if(state.type==='radar') return hasMetricData(p,mets,false);
+  return hasMetricData(p,[mets[0]],false); // bar / donut / pie
+}
+function chartPlayers(){ return plottedPlayers().filter(chartHasData); }
 // Sort the selected players by the primary metric so bar/donut/arrow read in a clean order
 // (#3). 'none' preserves the existing order (country grouping / manual). For arrow the sort key
 // is the size of change; for others it's the metric value. Direction: desc = most first.
@@ -419,10 +433,12 @@ function reconcileSelForType(){
   const cap=capFor(state.type);
   if(state.type==='arrow'){ reconcileArrowSel(cap); }
   else if(state.type==='donut'){ reconcileDonutSel(cap); }
-  else if(cap===Infinity){ state.sel=state.candidates.slice(); }
+  else if(cap===Infinity){ state.sel=state.candidates.filter(id=>{const p=state.players.find(x=>x.id===id);return p&&chartHasData(p);}); }
   else {
-    // #2: pick the cap-many BEST by the ranking metric, not the front of the country-sorted list.
-    state.sel = orderByBest(state.candidates).slice(0, cap);
+    // #2: pick the cap-many BEST by the ranking metric, drawing ONLY from players who actually
+    // have data for the metric(s) — a 0/null player is never included just to fill the cap.
+    const withData=state.candidates.filter(id=>{const p=state.players.find(x=>x.id===id);return p&&chartHasData(p);});
+    state.sel = orderByBest(withData).slice(0, cap);
   }
   state.highlight=state.highlight.filter(id=>state.sel.includes(id));
 }
@@ -431,15 +447,17 @@ function reconcileSelForType(){
 // in the Colours section is left completely alone.
 function reconcileDonutSel(cap){
   const me=selM()[0];
-  state.sel=applyCap(state.candidates,cap);
+  // only players with real data for the metric, ranked biggest-first, then capped.
+  let ids=state.candidates.filter(id=>{const p=state.players.find(x=>x.id===id);return p&&chartHasData(p);});
   if(me){
-    state.sel=state.sel.slice().sort((a,b)=>{
+    ids=ids.slice().sort((a,b)=>{
       const pa=state.players.find(p=>p.id===a), pb=state.players.find(p=>p.id===b);
-      const va=pa?(typeof val(pa,me.key)==='number'?val(pa,me.key):0):0;
-      const vb=pb?(typeof val(pb,me.key)==='number'?val(pb,me.key):0):0;
+      const va=pa&&typeof val(pa,me.key)==='number'?val(pa,me.key):0;
+      const vb=pb&&typeof val(pb,me.key)==='number'?val(pb,me.key):0;
       return vb-va;
     });
   }
+  state.sel=applyCap(ids,cap);
 }
 function toggleSelCheck(id){
   const cap=capFor(state.type);
@@ -464,26 +482,28 @@ function normFn(players,key){const vs=players.map(p=>val(p,key)).filter(v=>v!=nu
 function rankAndApply(mode){
   const cap=capFor(state.type), mets=selM();
   if(!mets.length||!state.candidates.length) return;
+  // Rank across the ENTIRE candidate pool (not just the currently-selected subset), and never
+  // include a player without real data for the metric(s) — a 0/null player can't be "best" or
+  // "worst", it simply has no result to rank.
+  const metricsForType = state.type==='scatter' ? mets.slice(0,2) : (state.type==='radar' ? mets : [mets[0]]);
+  const forArrow = state.type==='arrow';
   let scored;
-  if(state.type==='arrow'){
+  if(forArrow){
     const me=mets[0];
     scored=state.candidates.map(id=>{
       const p=state.players.find(x=>x.id===id);
-      const a=p&&p.pre?p.pre[me.key]:null, b=p&&p.wc?p.wc[me.key]:null;
-      if(typeof a!=='number'||typeof b!=='number') return null; // no valid comparison possible — exclude, don't sentinel-score
+      if(!p || !hasMetricData(p,[me],true)) return null;
+      const a=p.pre[me.key], b=p.wc[me.key];
       const delta=me.low?(a-b):(b-a); // positive delta = improvement, regardless of metric direction
       return {id,score:delta};
     }).filter(Boolean);
   } else {
-    const pool=state.candidates.map(id=>state.players.find(p=>p.id===id)).filter(Boolean);
+    const pool=state.candidates.map(id=>state.players.find(p=>p.id===id)).filter(p=>p && hasMetricData(p,metricsForType,false));
     const fns=mets.map(me=>normFn(pool,me.key));
-    scored=state.candidates.map(id=>{
-      const p=state.players.find(x=>x.id===id);
-      if(!p) return null;
-      if(mets.every(me=>val(p,me.key)==null)) return null; // no data for any selected metric — exclude entirely
+    scored=pool.map(p=>{
       const score=fns.reduce((s,f)=>s+f(p),0)/fns.length;
-      return {id,score};
-    }).filter(Boolean);
+      return {id:p.id,score};
+    });
   }
   scored.sort((x,y)=> mode==='best' ? y.score-x.score : x.score-y.score);
   state.sel=scored.slice(0,cap).map(s=>s.id);
@@ -630,19 +650,19 @@ function qualifyByInnings(pool,disc,minInns){
 // always means "no real data coerced to zero", so those are treated as missing too. Totals
 // (runs/wickets) legitimately can be 0, so they're kept.
 function hasMetricData(p,metrics,forArrow){
+  // GLOBAL RULE: a value of 0 OR missing (null/undefined) is never real data for any metric —
+  // no genuine cricket rate/total/edge is ever exactly 0 in a meaningful way, so it always means
+  // "didn't feature". This one predicate governs every place a player is chosen, ranked, capped,
+  // or drawn, so no chart, ranking, or randomiser build can ever surface a 0/blank player.
   return metrics.every(me=>{
     if(forArrow){
       const a=p.pre?p.pre[me.key]:null, b=p.wc?p.wc[me.key]:null;
       if(typeof a!=='number'||typeof b!=='number') return false;
-      // For rate/edge/pct, a 0 on EITHER side means "no real data" — a 0→100 or 93→0 arrow is
-      // meaningless, not an improvement/decline. Only totals can legitimately be 0. (#1)
-      if(me.family!=='total' && (a===0 || b===0)) return false;
+      if(a===0 || b===0) return false; // 0 on either window = didn't feature that window
       return true;
     }
     const v=val(p,me.key);
-    if(typeof v!=='number') return false;
-    if(me.family!=='total' && v===0) return false; // #2: drop coerced-zero rate/edge/pct values
-    return true;
+    return typeof v==='number' && v!==0;
   });
 }
 // #2: a chart is pointless if its metric barely varies (e.g. everyone at 0). Reject a built
@@ -1266,7 +1286,7 @@ function commonOpts(extra){return Object.assign({responsive:true,maintainAspectR
   plugins:{legend:{display:state.legend&&(state.type==='donut'||(state.type==='radar'&&!state.radarSep)),position:'top',align:'end',labels:{color:PP.text,font:chartFont(12.5),boxWidth:12,boxHeight:12,padding:12,usePointStyle:true}},tooltip:{enabled:true}}},extra||{});}
 
 function buildChart(){
-  const players=plottedPlayers().slice(0,capFor(state.type)===Infinity?9999:capFor(state.type));
+  const players=chartPlayers().slice(0,capFor(state.type)===Infinity?9999:capFor(state.type));
   const mets=selM(); if(!players.length||!mets.length) return null;
   const labels=players.map(p=>p.name), cols=players.map((p,i)=>colorOf(p,i)), t=state.type;
 
@@ -1786,12 +1806,13 @@ function autoDescribeFooter(){
   const rangeText = state.type==='arrow' ? 'Comparing WC to pre-WC data.' : 'All data since last WC.';
   const trueCountry = state.filters.country;
   const countryPrefix = trueCountry ? `${DEMONYMS[trueCountry]||trueCountry} ` : '';
+  const shownCount = chartPlayers().length; // only players actually drawn (with data for this metric)
   let scope;
   if(state.type==='scatter'){ scope=`Every qualifying ${countryPrefix}${scopeWordSing} (min ${inningsThreshold(state.range)} inns)`; }
-  else if(state.type==='donut'){ scope=`${countryPrefix}${scopeWord}, top ${state.sel.length} by ${info0.noun}`; }
+  else if(state.type==='donut'){ scope=`${countryPrefix}${scopeWord}, top ${shownCount} by ${info0.noun}`; }
   else if(state.type==='radar'){ scope=`Selected ${countryPrefix}${scopeWord}`; }
   else if(state.type==='arrow'){ const shown=plottedPlayers().filter(p=>arrowHasBoth(p,me0.key)).length; scope=`${shown} ${countryPrefix}${scopeWord} with the biggest change`; }
-  else { scope=`Top ${state.sel.length} ${countryPrefix}${scopeWord} by ${info0.noun}`; }
+  else { scope=`Top ${shownCount} ${countryPrefix}${scopeWord} by ${info0.noun}`; }
   return `${info0.full} · ${scope}. ${rangeText}`;
 }
 // Regenerate the chart's title + subtitle from the CURRENT chart state (type/metric/players/
@@ -1801,7 +1822,7 @@ function autoDescribeFooter(){
 // text. This is what keeps the description from getting "stuck" after a direct metric change.
 function regenAutoText(){
   if(!state.autoText) return;
-  const mets=selM(); const players=plottedPlayers();
+  const mets=selM(); const players=chartPlayers(); // only describe players actually drawn (with data)
   // only describe a genuinely renderable chart; otherwise leave placeholders in place
   const need = state.type==='scatter'?2 : state.type==='radar'?3 : 1;
   if(mets.length<need || players.length<1){ return; }
@@ -1863,7 +1884,7 @@ function render(){
   updateSetNote();
 }
 function renderSeparate(){
-  const players=plottedPlayers().slice(0,6),mets=selM(),host=document.getElementById('multi');host.innerHTML='';
+  const players=chartPlayers().slice(0,6),mets=selM(),host=document.getElementById('multi');host.innerHTML='';
   if(players.length<1||mets.length<3){host.style.display='flex';host.innerHTML='<div style="margin:auto;font-family:'+BODY+';font-style:italic;color:'+PP.sub+'">Pick 1–6 players and 3+ metrics for separate radars.</div>';return;}
   host.style.display='grid';
   // Use a 6-unit base grid and place each cell with an explicit column span + start. This lets
