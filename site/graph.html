@@ -196,6 +196,7 @@
               <div class="seg full" id="disc"><button data-v="batting" class="on">Batting</button><button data-v="bowling">Bowling</button></div>
               <button class="btn" id="advBtn">Advanced Filters</button>
             </div>
+            <div id="activeFilters" class="hint2" style="margin-top:6px;display:none"></div>
             <div class="dd" style="margin-top:8px">
               <button class="dd-btn" id="metBtn"><span id="metLabel">Choose metrics…</span><span class="ca">&#9660;</span></button>
               <div class="dd-menu" id="metMenu"></div>
@@ -238,7 +239,7 @@
 
     <!-- RIGHT -->
     <div class="panel stage">
-      <div class="stage-top"><div style="flex:1"></div>
+      <div class="stage-top"><button class="btn primary" id="surpriseBtn" title="Randomise the whole chart">&#127922; Randomise</button><div style="flex:1"></div>
         <button class="btn primary" id="download">Download PNG</button><a class="dl" id="dllink"></a></div>
       <div class="canvas-host">
         <div class="card" id="card">
@@ -312,8 +313,8 @@ const CAPS={bar:14,scatter:Infinity,radar:6,donut:20,arrow:8};
 const state = {
   discipline:'batting', range:'pre', players:[], sel:[], candidates:[], colors:{}, highlight:[],
   metrics:{batting:['batting_sr','batting_average'], bowling:['economy','wickets']}, axisLabels:{},
-  type:'bar', barOrient:'h', donutCut:'52%', radarSep:true, arrowStyle:'arrow', arrowCols:'1', barNums:false, donutNums:false, donutPct:false, arrowNums:true, arrowBands:true, selRank:null,
-  title:'[Title]', sub:'[Subtitle]', footMode:'auto', footCustom:'', footShow:true,
+  type:'bar', barOrient:'h', donutCut:'52%', radarSep:true, arrowStyle:'arrow', arrowCols:'1', barNums:false, donutNums:false, donutPct:false, arrowNums:true, arrowBands:true, selRank:null, chartSort:'none',
+  title:'[Title]', sub:'[Subtitle]', autoText:true, footMode:'auto', footCustom:'', footShow:true,
   legend:true, axis:true, grid:true,
   quadOn:false, quadMode:'data', quadLabels:{tl:'',tr:'',bl:'',br:''}, trend:false,
   dotUnsel:PP.grey, dotSel:'#c9372c',
@@ -343,6 +344,22 @@ function axLab(key,def){const v=state.axisLabels[key];return(v!=null&&v!=='')?v:
 function val(p,key){const m=mByKey(key);if(m&&m.src==='graph')return p.graph&&typeof p.graph[key]==='number'?p.graph[key]:null;if(key==='age')return typeof p.age==='number'?p.age:null;const o=(state.range==='wc'?p.wc:p.pre)||{};const v=o[key];if(v==null&&m&&m.family==='total')return 0;return typeof v==='number'?v:null;}
 function matchFilters(p){const f=state.filters;if(f.role&&p.role!==f.role)return false;if(f.hand&&p.hand!==f.hand)return false;if(f.country&&p.country!==f.country)return false;return true;}
 function plottedPlayers(){return state.sel.map(id=>state.players.find(p=>p.id===id)).filter(Boolean);}
+// Sort the selected players by the primary metric so bar/donut/arrow read in a clean order
+// (#3). 'none' preserves the existing order (country grouping / manual). For arrow the sort key
+// is the size of change; for others it's the metric value. Direction: desc = most first.
+function applyChartSort(){
+  if(!['bar','donut','arrow'].includes(state.type)) return;
+  if(!state.chartSort || state.chartSort==='none') return;
+  const mets=selM(); if(!mets.length) return; const me=mets[0];
+  const keyOf=(p)=>{
+    if(state.type==='arrow'){ const a=p.pre?p.pre[me.key]:null,b=p.wc?p.wc[me.key]:null; if(typeof a!=='number'||typeof b!=='number') return null; return me.low?a-b:b-a; }
+    const v=val(p,me.key); return typeof v==='number'?v:null;
+  };
+  const dir = state.chartSort==='asc' ? 1 : -1;
+  state.sel = state.sel.slice().map(id=>state.players.find(p=>p.id===id)).filter(Boolean)
+    .sort((x,y)=>{ const vx=keyOf(x),vy=keyOf(y); if(vx==null&&vy==null)return 0; if(vx==null)return 1; if(vy==null)return -1; return (vx-vy)*dir; })
+    .map(p=>p.id);
+}
 // Default arrangement for a fresh candidate list: grouped by country, alphabetically, then
 // by name within a country. Manual drag-reordering (Colours section) overrides this until
 // the next fresh filter/search result replaces the candidate list.
@@ -368,17 +385,45 @@ function reconcileArrowSel(cap){
   const me=selM()[0];
   if(!me){ state.sel=applyCap(state.candidates,cap); return; }
   const hasBoth=id=>{ const p=state.players.find(x=>x.id===id); return !!p && arrowHasBoth(p,me.key); };
-  const curValid=state.sel.filter(id=>state.candidates.includes(id)&&hasBoth(id));
-  const otherValid=state.candidates.filter(id=>hasBoth(id)&&!curValid.includes(id));
+  // #2: rank valid players by size of change (biggest movers first) rather than country order.
+  const changeOf=id=>{ const p=state.players.find(x=>x.id===id); if(!p) return -Infinity; const a=p.pre[me.key],b=p.wc[me.key]; return Math.abs(me.low?a-b:b-a); };
+  const valid=state.candidates.filter(hasBoth).sort((x,y)=>changeOf(y)-changeOf(x));
   const invalid=state.candidates.filter(id=>!hasBoth(id));
-  state.sel=curValid.concat(otherValid).concat(invalid).slice(0,cap);
+  state.sel=valid.concat(invalid).slice(0,cap);
+}
+// #2: when a capped chart (bar/radar/arrow/donut) has more candidates than it can show, keep the
+// BEST players by a ranking metric — a rate metric if one is selected, otherwise a total — rather
+// than the alphabetical-country order inherited from Compare Stats (which just floods the chart
+// with whichever country sorts first). Scatter is uncapped so it's unaffected.
+function rankingMetric(){
+  const mets=selM(); if(!mets.length) return null;
+  const rate=mets.find(m=>m.family==='rate'||m.family==='edge'||m.family==='pct');
+  if(rate) return rate;
+  const total=mets.find(m=>m.family==='total');
+  return total || mets[0];
+}
+// Order a list of ids best-first by the ranking metric (direction-aware: low-is-better metrics
+// rank ascending). Ties and missing values fall to the back but keep a stable name order.
+function orderByBest(ids){
+  const me=rankingMetric(); if(!me) return ids.slice();
+  return ids.slice().sort((a,b)=>{
+    const pa=state.players.find(p=>p.id===a), pb=state.players.find(p=>p.id===b);
+    const va=pa&&typeof val(pa,me.key)==='number'?val(pa,me.key):null;
+    const vb=pb&&typeof val(pb,me.key)==='number'?val(pb,me.key):null;
+    if(va==null&&vb==null) return ((pa&&pa.name)||'').localeCompare((pb&&pb.name)||'');
+    if(va==null) return 1; if(vb==null) return -1;
+    return me.low ? va-vb : vb-va;
+  });
 }
 function reconcileSelForType(){
   const cap=capFor(state.type);
   if(state.type==='arrow'){ reconcileArrowSel(cap); }
   else if(state.type==='donut'){ reconcileDonutSel(cap); }
   else if(cap===Infinity){ state.sel=state.candidates.slice(); }
-  else if(state.sel.length>cap){ state.sel=state.sel.slice(0,cap); }
+  else {
+    // #2: pick the cap-many BEST by the ranking metric, not the front of the country-sorted list.
+    state.sel = orderByBest(state.candidates).slice(0, cap);
+  }
   state.highlight=state.highlight.filter(id=>state.sel.includes(id));
 }
 // Donut defaults to biggest-value-first (so the initial top-7/Other split is the sensible
@@ -444,6 +489,728 @@ function rankAndApply(mode){
   state.sel=scored.slice(0,cap).map(s=>s.id);
   state.highlight=state.highlight.filter(id=>state.sel.includes(id));
 }
+
+/* ---------- randomiser ("Randomise") ----------
+   Archetype-driven: each spin rolls a chart archetype (weighted, with a pity timer so
+   rarer forms like radar always surface within a few clicks), then that archetype dictates
+   discipline, display metrics, player set, and any variation toggle. Numeric qualifying is
+   done internally here (option 1) and written straight to candidates/sel — it never touches
+   state.filters, which only ever holds the categorical role/hand/country dimensions. */
+
+// Display-metric eligibility. Rule: rate/edge/pct families are always plottable; total/peak/
+// age are filter-only EXCEPT the three additive volumes that read fine on an axis.
+const DISPLAY_TOTAL_OK = ['runs','wickets','top7_wickets'];
+const DONUT_METRIC_OK  = ['runs','wickets','top7_wickets']; // additive & meaningful as a share
+
+/* ---- cricket domain knowledge for the randomiser ----
+   The randomiser must produce charts that make cricketing sense: batting metrics for batting
+   roles, bowling metrics for bowling roles, specialist metrics only for the right players, and
+   coherent metric groups for radar (not a random grab-bag). */
+
+// Which roles bat vs bowl. All-Rounders qualify for both.
+const BATTING_ROLES = ['Top Order Bat','Middle Order Bat','Finisher','Wicket Keeper','All-Rounder'];
+const BOWLING_ROLES = ['Pacer','Spinner','All-Rounder'];
+const TOP_ORDER_ROLES = ['Top Order Bat','All-Rounder']; // openers / top order — the only ones a powerplay stat is meaningful for
+
+// Metric-level restrictions (#6, #7):
+//  - EDGE metrics are only meaningful on Since-Last-WC data, so never on arrow/slope (which
+//    compares pre vs WC) and never when the range is WC.
+//  - powerplay_sr (PP SR) only makes sense for top-order batters.
+const EDGE_KEYS = ['sr_edge','wicket_edge','econ_edge'];
+const ROLE_RESTRICTED = { powerplay_sr: TOP_ORDER_ROLES };
+function isEdgeMetric(key){ return EDGE_KEYS.includes(key); }
+
+// The metric determines the discipline; the role filter must match it.
+function metricDiscipline(me){
+  return (METRICS.batting.basic.concat(METRICS.batting.advanced,METRICS.batting.attribute)).some(x=>x.key===me.key) ? 'batting' : 'bowling';
+}
+// Roles appropriate for a metric's discipline (used to keep the player pool coherent).
+function rolesForDiscipline(disc){ return disc==='batting' ? BATTING_ROLES : BOWLING_ROLES; }
+// A player is eligible for a metric if their role fits the discipline AND any role-restriction.
+function playerFitsMetric(p,me){
+  const disc=metricDiscipline(me);
+  if(!rolesForDiscipline(disc).includes(p.role)) return false;
+  const restrict=ROLE_RESTRICTED[me.key];
+  if(restrict && !restrict.includes(p.role)) return false;
+  return true;
+}
+
+// Curated radar metric GROUPS (#1) — each is a coherent story, not a random set. The
+// randomiser picks a whole group so every radar compares like-for-like axes.
+const RADAR_GROUPS = {
+  batting:[
+    { name:'aggression', keys:['batting_sr','first_10_ball_sr','balls_per_boundary','non_boundary_sr'] },
+    { name:'reliability', keys:['batting_average','dot_pct','non_boundary_sr','runs'] },
+    { name:'top-order impact', keys:['powerplay_sr','first_10_ball_sr','batting_sr','runs'], roles:TOP_ORDER_ROLES },
+  ],
+  bowling:[
+    { name:'economy', keys:['economy','bowling_dot_pct','boundary_runs_per_over'] },
+    { name:'wicket-taking', keys:['wickets','bowling_sr','bowling_average','top7_wickets'] },
+    { name:'control & threat', keys:['economy','bowling_sr','bowling_dot_pct','wickets'] },
+  ]
+};
+
+// Per-metric language for the randomiser's headlines/subtitles (spec Part A). `full` = the
+// spelled-out name used in prose (short labels like "Wkts" stay on the axes; prose says
+// "wickets"); `verb` = natural phrase for "who leads"; `hi` = true if higher is better; `noun`
+// = the thing being measured, for share/ranking sentences.
+const METRIC_INFO = {
+  // batting
+  runs:                {full:'Runs', verb:'has scored the most runs', hi:true, noun:'runs'},
+  batting_average:     {full:'Batting Average', verb:'averages the most', hi:true, noun:'average'},
+  batting_sr:          {full:'Strike Rate', verb:'scores fastest', hi:true, noun:'strike rate'},
+  first_10_ball_sr:    {full:'Strike Rate over the First 10 Balls', verb:'starts fastest', hi:true, noun:'early strike rate'},
+  powerplay_sr:        {full:'Powerplay Strike Rate', verb:'attacks hardest in the powerplay', hi:true, noun:'powerplay strike rate'},
+  balls_per_boundary:  {full:'Balls per Boundary', verb:'finds the boundary most often', hi:false, noun:'boundary-hitting'},
+  dot_pct:             {full:'Dot-Ball Percentage', verb:'wastes the fewest balls', hi:false, noun:'dot-ball rate'},
+  non_boundary_sr:     {full:'Non-Boundary Strike Rate', verb:'rotates the strike best', hi:true, noun:'strike rotation'},
+  sr_edge:             {full:'Strike Rate Edge', verb:'beats her expected tempo by most', hi:true, noun:'strike-rate edge'},
+  highest_score:       {full:'Highest Score', verb:'has the highest score', hi:true, noun:'top score'},
+  fifties_plus:        {full:'Fifty-plus Scores', verb:'passes fifty most often', hi:true, noun:'fifties'},
+  innings_batted:      {full:'Innings', verb:'', hi:true, noun:'innings'},
+  // bowling
+  wickets:             {full:'Wickets', verb:'has taken the most wickets', hi:true, noun:'wickets'},
+  economy:             {full:'Economy', verb:'has been the most economical', hi:false, noun:'economy'},
+  bowling_average:     {full:'Bowling Average', verb:'averages the fewest', hi:false, noun:'bowling average'},
+  bowling_sr:          {full:'Bowling Strike Rate', verb:'strikes most often', hi:false, noun:'strike rate'},
+  top7_wickets:        {full:'Top-Order Wickets', verb:'has taken the most top-order wickets', hi:true, noun:'top-order wickets'},
+  top7_bowling_sr:     {full:'Top-Order Bowling Strike Rate', verb:'breaks the top order fastest', hi:false, noun:'top-order strike rate'},
+  bowling_dot_pct:     {full:'Dot-Ball Percentage', verb:'builds the most pressure', hi:true, noun:'pressure'},
+  boundary_runs_per_over:{full:'Boundary Runs per Over', verb:'leaks the fewest boundaries', hi:false, noun:'boundary concession'},
+  econ_edge:           {full:'Economy Edge', verb:'beats her expected economy by most', hi:true, noun:'economy edge'},
+  wicket_edge:         {full:'Wicket Edge', verb:'beats her expected wickets by most', hi:true, noun:'wicket edge'},
+  three_wicket_hauls:  {full:'Three-Wicket Hauls', verb:'takes three-fers most often', hi:true, noun:'three-fers'},
+  innings_bowled:      {full:'Innings', verb:'', hi:true, noun:'innings'},
+};
+function mInfo(me){ return METRIC_INFO[me.key] || {full:me.label, verb:`leads on ${me.label}`, hi:!me.low, noun:me.label.toLowerCase()}; }
+// Possessive with correct apostrophe (#2): trailing-s names take just an apostrophe.
+function possessive(name){ if(!name) return name; return /s$/i.test(name) ? name+"'" : name+"'s"; }
+// Format a metric value for prose using its decimal places.
+function fmtVal(me,v){ if(typeof v!=='number') return ''; return me.dp ? v.toFixed(me.dp) : Math.round(v).toLocaleString(); }
+
+function displayMetricsFor(disc, opts){
+  opts=opts||{};
+  const m=METRICS[disc]; const all=m.attribute.concat(m.basic,m.advanced);
+  return all.filter(me=> me.family==='rate'||me.family==='edge'||me.family==='pct' || DISPLAY_TOTAL_OK.includes(me.key))
+            .filter(me=> me.key!=='age')
+            .filter(me=> !(opts.noEdge && isEdgeMetric(me.key)))   // #6
+            .filter(me=> !(opts.noTotal && me.family==='total'))   // arrow/slope: can't compare totals (excludeTotal)
+            .filter(me=> !(opts.noRoleRestricted && ROLE_RESTRICTED[me.key])); // exclude specialist metrics when we can't guarantee the right role set
+}
+function donutMetricsFor(disc){
+  const m=METRICS[disc]; const all=m.attribute.concat(m.basic,m.advanced);
+  return all.filter(me=>DONUT_METRIC_OK.includes(me.key));
+}
+// Filter a player pool to those who fit the chosen metric(s) — right role + right specialism.
+function poolForMetrics(mets){
+  return state.players.filter(p=> mets.every(me=>playerFitsMetric(p,me)));
+}
+// #5: minimum innings so charts only ever feature players with a real sample. Threshold depends
+// on the range: 10 innings for Since-Last-WC data, 2 for the shorter World Cup window. For arrow
+// (which spans both) BOTH windows must clear their own threshold.
+function inningsThreshold(range){ return range==='wc' ? 2 : 10; }
+function qualifiesInnings(p,disc,forArrow){
+  const key = disc==='batting' ? 'innings_batted' : 'innings_bowled';
+  if(forArrow){
+    const pre=p.pre?p.pre[key]:null, wc=p.wc?p.wc[key]:null;
+    return typeof pre==='number' && pre>=inningsThreshold('pre') && typeof wc==='number' && wc>=inningsThreshold('wc');
+  }
+  const o=(state.range==='wc'?p.wc:p.pre)||{}; const v=o[key];
+  return typeof v==='number' && v>=inningsThreshold(state.range);
+}
+function qualifyInnings(pool,disc,forArrow){ return pool.filter(p=>qualifiesInnings(p,disc,forArrow)); }
+// Legacy scatter helper retained (tiered fallback).
+function qualifyByInnings(pool,disc,minInns){
+  const key = disc==='batting' ? 'innings_batted' : 'innings_bowled';
+  return pool.filter(p=>{ const v=val(p,key); return typeof v==='number' && v>=minInns; });
+}
+// #4 fix: a player only belongs on a chart if they actually have data for the metrics shown.
+// hasMetricData excludes anyone whose value is null for ANY selected display metric (or, for
+// arrow, who lacks a pre+wc pair). For rate/edge/pct metrics a value of exactly 0 almost
+// always means "no real data coerced to zero", so those are treated as missing too. Totals
+// (runs/wickets) legitimately can be 0, so they're kept.
+function hasMetricData(p,metrics,forArrow){
+  return metrics.every(me=>{
+    if(forArrow){
+      const a=p.pre?p.pre[me.key]:null, b=p.wc?p.wc[me.key]:null;
+      if(typeof a!=='number'||typeof b!=='number') return false;
+      // For rate/edge/pct, a 0 on EITHER side means "no real data" — a 0→100 or 93→0 arrow is
+      // meaningless, not an improvement/decline. Only totals can legitimately be 0. (#1)
+      if(me.family!=='total' && (a===0 || b===0)) return false;
+      return true;
+    }
+    const v=val(p,me.key);
+    if(typeof v!=='number') return false;
+    if(me.family!=='total' && v===0) return false; // #2: drop coerced-zero rate/edge/pct values
+    return true;
+  });
+}
+// #2: a chart is pointless if its metric barely varies (e.g. everyone at 0). Reject a built
+// set whose plotted values have essentially no spread. For arrow, "spread" is in the deltas.
+function hasUsefulSpread(players,me,forArrow){
+  const vals = forArrow
+    ? players.map(p=>{ const a=p.pre[me.key],b=p.wc[me.key]; return (me.low?a-b:b-a); })
+    : players.map(p=>val(p,me.key));
+  const nums=vals.filter(v=>typeof v==='number');
+  if(nums.length<2) return false;
+  const mn=Math.min(...nums), mx=Math.max(...nums);
+  if(mx===mn) return false;
+  // relative spread guard: range should be a non-trivial fraction of the magnitude
+  const mag=Math.max(Math.abs(mn),Math.abs(mx),1e-9);
+  return (mx-mn)/mag > 0.05;
+}
+const rndInt=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
+const pickOne=arr=>arr[Math.floor(Math.random()*arr.length)];
+function pickN(arr,n){ const c=arr.slice(); const out=[]; while(out.length<n&&c.length){ out.push(c.splice(Math.floor(Math.random()*c.length),1)[0]); } return out; }
+
+// #10: player-count ranges with an occasional "push high" so charts don't always sit mid-range.
+// Most spins use the normal band; ~30% of the time reach for the high end / cap.
+function countFor(kind){
+  const push = Math.random()<0.3;
+  switch(kind){
+    case 'bar':   return push ? rndInt(11,14) : rndInt(6,10);
+    case 'donut': return push ? rndInt(9,12)  : rndInt(5,8);   // 9-12 forces multiple into "Other"
+    case 'arrow': return push ? rndInt(9,10)  : rndInt(6,8);
+    case 'slope': return push ? rndInt(9,10)  : rndInt(6,8);
+    default:      return rndInt(6,10);
+  }
+}
+
+// Nearest-neighbour similarity (overlaid radar): normalise the chosen metrics across the
+// pool via the existing normFn, pick a random seed, take the k closest by Euclidean distance.
+function similarSet(pool,metrics,k){
+  if(pool.length<=k) return pool.slice();
+  const fns=metrics.map(me=>normFn(pool,me.key));
+  const vecs=pool.map(p=>({p,v:fns.map(f=>f(p))}));
+  const seed=vecs[Math.floor(Math.random()*vecs.length)];
+  const dist=a=>Math.sqrt(a.v.reduce((s,x,i)=>s+(x-seed.v[i])**2,0));
+  return vecs.slice().sort((a,b)=>dist(a)-dist(b)).slice(0,k).map(x=>x.p);
+}
+function minInnsFor(disc,tier){ return tier===3 ? 12 : tier===2 ? 6 : 1; }
+
+// Shared builders. Pools are now role-aware (poolForMetrics) so batting metrics only ever
+// pull batting-capable players and vice-versa (#4), and specialist metrics like PP SR only
+// pull the roles they apply to (#7). Edge metrics are excluded where the range makes them
+// invalid (#6). When a builder narrows to a role/discipline, it records that on the result
+// as `roleFilter` so surpriseMe can reflect it in the filter UI (#3).
+
+// The "realistic set" principle (#3): rather than ranking the whole population and cropping to
+// a top-N that misleadingly reads as "all players", each ranked/grouped builder works from a
+// coherent, role-appropriate pool and the caller reflects that scope honestly in the footer.
+function rankBuild(disc,n){
+  const pool=displayMetricsFor(disc,{noRoleRestricted:false}); const me=pickOne(pool);
+  let base=qualifyInnings(poolForMetrics([me]),disc,false).filter(matchFilters).filter(p=>hasMetricData(p,[me],false));
+  if(base.length<6) base=qualifyInnings(poolForMetrics([me]),disc,false).filter(p=>hasMetricData(p,[me],false));
+  if(base.length<6) return null;
+  const scored=base.map(p=>({p,v:val(p,me.key)}));
+  scored.sort((a,b)=> me.low ? a.v-b.v : b.v-a.v);
+  const players=scored.slice(0,Math.max(6,n)).map(x=>x.p);
+  if(players.length<6 || !hasUsefulSpread(players,me,false)) return null;
+  return {mets:[me], players, disc};
+}
+// #4: donut/pie compare share of a total, which only makes sense WITHIN A SINGLE TEAM (players
+// on different teams aren't competing for the same runs/wickets). So the donut always picks one
+// country and shows that team's internal split.
+function donutBuild(disc){
+  const pool=donutMetricsFor(disc); if(!pool.length) return null; const me=pickOne(pool);
+  const eligible=qualifyInnings(poolForMetrics([me]),disc,false).filter(p=>{const v=val(p,me.key);return typeof v==='number'&&v>0;});
+  // group eligible players by country, keep countries that can field a reasonable slice count
+  const byCountry={};
+  eligible.forEach(p=>{ if(!p.country) return; (byCountry[p.country]=byCountry[p.country]||[]).push(p); });
+  const viable=Object.keys(byCountry).filter(c=>byCountry[c].length>=5);
+  if(!viable.length) return null;
+  const country=pickOne(viable);
+  const scored=byCountry[country].map(p=>({p,v:val(p,me.key)})).sort((a,b)=>b.v-a.v);
+  const players=scored.slice(0,countFor('donut')).map(x=>x.p);
+  if(players.length<5) return null;
+  return {mets:[me], players, disc, country};
+}
+function arrowBuild(disc,n){
+  // #6: arrow/slope compares pre vs WC, so EDGE metrics (Since-Last-WC only) are excluded.
+  // Also excludes total metrics — the arrow chart can't meaningfully compare volumes and the
+  // recommender would auto-switch it to donut (which mislabels the footer).
+  const pool=displayMetricsFor(disc,{noEdge:true,noTotal:true}); const me=pickOne(pool);
+  let base=qualifyInnings(poolForMetrics([me]),disc,true).filter(matchFilters).filter(p=>hasMetricData(p,[me],true));
+  if(base.length<6) base=qualifyInnings(poolForMetrics([me]),disc,true).filter(p=>hasMetricData(p,[me],true));
+  if(base.length<6) return null;
+  const scored=base.map(p=>{ const a=p.pre[me.key],b=p.wc[me.key]; return {p,d:Math.abs((me.low?a-b:b-a))}; });
+  scored.sort((x,y)=>y.d-x.d);
+  const players=scored.slice(0,n).map(x=>x.p);
+  if(players.length<6 || !hasUsefulSpread(players,me,true)) return null;
+  return {mets:[me], players, disc};
+}
+// Radar builders draw from a curated metric GROUP (#1) so every radar compares coherent axes.
+function radarBuild(disc,overlaid){
+  const groups=RADAR_GROUPS[disc]; if(!groups||!groups.length) return null;
+  const grp=pickOne(groups);
+  const mets=grp.keys.map(mByKey).filter(Boolean);
+  if(mets.length<3) return null;
+  const grpRoles = grp.roles || rolesForDiscipline(disc);
+  const inRole=p=>grpRoles.includes(p.role);
+  let base=qualifyInnings(state.players.filter(inRole),disc,false).filter(matchFilters).filter(p=>hasMetricData(p,mets,false));
+  if(base.length< (overlaid?2:4)) base=qualifyInnings(state.players.filter(inRole),disc,false).filter(p=>hasMetricData(p,mets,false));
+  const need = overlaid?2:4;
+  if(base.length<need) return null;
+  const fns=mets.map(me=>normFn(base,me.key));
+  const scored=base.map(p=>({p,s:fns.reduce((a,f)=>a+f(p),0)/fns.length})).sort((a,b)=>b.s-a.s);
+  let players;
+  if(overlaid){
+    const top=scored[0].p;
+    const fnsPool=mets.map(me=>normFn(base,me.key));
+    const vt=fnsPool.map(f=>f(top));
+    const others=base.filter(p=>p!==top).map(p=>({p,d:Math.sqrt(fnsPool.reduce((s,f,i)=>s+(f(p)-vt[i])**2,0))})).sort((a,b)=>b.d-a.d);
+    players = others.length ? [top, others[0].p] : [top];
+    if(players.length<2) return null;
+  } else {
+    players=scored.slice(0,rndInt(4,Math.min(6,scored.length))).map(x=>x.p);
+    if(players.length<4) return null;
+  }
+  return {mets, players, disc, radarGroup:grp.name};
+}
+
+// Archetype table. weight = base pick weight; pity = force-surface after this many spins
+// without appearing. build(disc) returns {mets,players,disc} or null (re-roll). radarKind
+// marks the two radar variants so they can share one combined pity counter (#5).
+const ARCHETYPES = [
+  { id:'scatter_trends', weight:5, pity:8, apply(){ state.type='scatter'; },
+    build(disc){ const pool=displayMetricsFor(disc,{noRoleRestricted:true}); const mets=pickN(pool,2);
+      // #5: qualified by innings (10 since-last-WC / 2 WC). Fall back to a looser gate only if
+      // too few clear the bar to fill a scatter.
+      let cand=qualifyInnings(poolForMetrics(mets),disc,false).filter(p=>hasMetricData(p,mets,false));
+      if(cand.length<20){ cand=qualifyByInnings(poolForMetrics(mets),disc,minInnsFor(disc,2)).filter(p=>hasMetricData(p,mets,false)); }
+      if(cand.length<20) return null;
+      return {mets, players:cand, disc}; } },
+  { id:'bar_best_h', weight:3, pity:10, apply(){ state.type='bar'; state.barOrient='h'; },
+    build(disc){ return rankBuild(disc, countFor('bar')); } },
+  { id:'bar_best_v', weight:2, pity:10, apply(){ state.type='bar'; state.barOrient='v'; },
+    build(disc){ return rankBuild(disc, countFor('bar')); } },
+  { id:'donut', weight:2, pity:9, apply(){ state.type='donut'; state.donutCut='52%'; },
+    build(disc){ return donutBuild(disc); } },
+  { id:'pie', weight:1, pity:9, apply(){ state.type='donut'; state.donutCut='0'; },
+    build(disc){ return donutBuild(disc); } },
+  { id:'radar_overlaid', radarKind:true, weight:1, pity:99, apply(){ state.type='radar'; state.radarSep=false; },
+    build(disc){ return radarBuild(disc,true); } },
+  { id:'radar_spread', radarKind:true, weight:3, pity:99, apply(){ state.type='radar'; state.radarSep=true; },
+    build(disc){ return radarBuild(disc,false); } },
+  { id:'arrow_stacked', weight:2, pity:8, apply(){ state.type='arrow'; state.arrowStyle='arrow'; state.arrowCols='1'; },
+    build(disc){ return arrowBuild(disc, countFor('arrow')); } },
+  { id:'arrow_side', weight:2, pity:8, apply(){ state.type='arrow'; state.arrowStyle='arrow'; state.arrowCols='2'; },
+    build(disc){ return arrowBuild(disc, countFor('arrow')); } },
+  { id:'slope', weight:2, pity:8, apply(){ state.type='arrow'; state.arrowStyle='slope'; },
+    build(disc){ return arrowBuild(disc, countFor('slope')); } },
+];
+const RADAR_COMBINED_PITY = 7; // #5: EITHER radar type satisfies this — guarantees radar within <10, not per-type.
+
+// Optional archetype-appropriate categorical filter. Grouping archetypes (donut/bar/arrow)
+// like a role or country cut; scatter only takes one if it still leaves a big field.
+function maybeApplyCategoricalFilter(archId,disc){
+  const wantsGroup = /donut|pie|bar|arrow|slope/.test(archId);
+  const applyIt = Math.random() < (wantsGroup?0.6:0.35);
+  if(!applyIt) return;
+  const dims=[];
+  const countries=[...new Set(state.players.map(p=>p.country).filter(Boolean))];
+  // only roles valid for this discipline — never a batting role on a bowling chart
+  const validRoles=rolesForDiscipline(disc).filter(r=>r!=='All-Rounder');
+  const roles=[...new Set(state.players.map(p=>p.role).filter(r=>validRoles.includes(r)))];
+  if(countries.length>2) dims.push(['country',pickOne(countries)]);
+  if(roles.length>1) dims.push(['role',pickOne(roles)]);
+  if(!dims.length) return;
+  const [k,v]=pickOne(dims);
+  state.filters[k]=v;
+}
+// Ground truth: the ONLY filters we display are ones true of EVERY player actually shown. This
+// makes the Advanced Filters panel and the title honest no matter what pool/fallback the build
+// used — a title can never say "Irish" unless every plotted player is Irish. (#1/#2/#3)
+function deriveFilters(players){
+  const uniq=k=>[...new Set(players.map(p=>p[k]).filter(Boolean))];
+  const c=uniq('country'), r=uniq('role'), h=uniq('hand');
+  return {
+    country: c.length===1 ? c[0] : '',
+    role:    r.length===1 ? r[0] : '',
+    hand:    h.length===1 ? h[0] : ''
+  };
+}
+
+// Translate the randomiser's selection into a FULL set of real, editable advanced-filter
+// conditions that reproduce (as closely as a predicate can) the exact plotted population. The
+// Compare Stats popup renders these as editable rows: "Country is X", "Innings ≥ 10", "Wickets ≥
+// 22", etc. Returns { filters:{role,hand,country}, conds:[{field,op,v1,v2}] }.
+//   - The categorical country/role become simple filters.
+//   - The min-innings gate becomes an explicit Innings condition.
+//   - The ranked "top-N by metric" cut becomes a threshold at the boundary value of the shown
+//     set (gte the lowest shown value for higher-is-better; lte the highest for lower-is-better),
+//     so editing that number widens/narrows the field exactly as expected. Arrow uses no metric
+//     cut (its "biggest change" ranking isn't a single-value predicate) but still carries the
+//     categorical + innings conditions.
+function buildRandomiserRecipe(result, players, disc){
+  const me = result.mets[0];
+  const inKey = disc==='batting' ? 'innings_batted' : 'innings_bowled';
+  const f = deriveFilters(players);
+  const conds = [];
+  // min innings gate (matches the randomiser's own qualification)
+  conds.push({ field: inKey, op:'gte', v1: String(inningsThreshold(state.range)), v2:'' });
+  // metric cut reproducing the ranked set — skip for arrow (change-ranked) and radar (not ranked
+  // on a single value in a way a threshold captures cleanly).
+  if(state.type!=='arrow' && state.type!=='radar' && me){
+    const vals = players.map(p=>val(p,me.key)).filter(v=>typeof v==='number');
+    if(vals.length){
+      const dp = me.dp || 0;
+      const round = (n)=>{ const k=Math.pow(10,dp); return Math.round(n*k)/k; };
+      if(me.low){ // lower is better: everyone shown is ≤ the worst (highest) shown value
+        conds.push({ field: me.key, op:'lte', v1: String(round(Math.max(...vals))), v2:'' });
+      } else {    // higher is better: everyone shown is ≥ the lowest shown value
+        conds.push({ field: me.key, op:'gte', v1: String(round(Math.min(...vals))), v2:'' });
+      }
+    }
+  }
+  return { filters:f, conds };
+}
+
+const spinHistory={}; // archId -> spins since last shown
+let radarSinceLast=99; // #5: spins since ANY radar appeared
+// Choose an archetype WITHOUT mutating history (history commits once, after a spin actually
+// succeeds — otherwise failed/rejected retries corrupt the pity counters).
+function chooseArchetype(exclude){
+  ARCHETYPES.forEach(a=>{ if(spinHistory[a.id]==null) spinHistory[a.id]=999; });
+  const avail=ARCHETYPES.filter(a=>!exclude||!exclude.has(a.id));
+  const pool=avail.length?avail:ARCHETYPES;
+  // #5: if no radar within combined threshold, force a radar (weighted between the two).
+  if(radarSinceLast>=RADAR_COMBINED_PITY){
+    const radars=pool.filter(a=>a.radarKind);
+    if(radars.length){ const total=radars.reduce((s,a)=>s+a.weight,0); let r=Math.random()*total;
+      return radars.find(a=>(r-=a.weight)<0)||radars[0]; }
+  }
+  const overdue=pool.filter(a=>!a.radarKind && spinHistory[a.id]>=a.pity);
+  if(overdue.length) return overdue.sort((a,b)=>(spinHistory[b.id]-b.pity)-(spinHistory[a.id]-a.pity))[0];
+  const total=pool.reduce((s,a)=>s+a.weight,0); let r=Math.random()*total;
+  return pool.find(a=>(r-=a.weight)<0)||pool[0];
+}
+function commitRoll(chosen){
+  ARCHETYPES.forEach(a=>{ spinHistory[a.id] = a.id===chosen.id ? 0 : spinHistory[a.id]+1; });
+  radarSinceLast = chosen.radarKind ? 0 : radarSinceLast+1;
+}
+
+// #8: reject a spin whose player set is ≥80% the same as the previous spin's, so two clicks
+// in a row never show near-identical rosters in a different format.
+let lastPlayerIds=[];
+function tooSimilarToLast(ids){
+  if(!lastPlayerIds.length) return false;
+  const setPrev=new Set(lastPlayerIds);
+  const overlap=ids.filter(id=>setPrev.has(id)).length;
+  const ratio=overlap/Math.max(ids.length,lastPlayerIds.length);
+  return ratio>=0.8;
+}
+
+// #7: if a randomised set is all one country, the default team-colour makes every series the
+// same shade. Detect that and assign distinct preset colours per player instead.
+function ensureColourVariety(players){
+  state.colors={};
+  const countries=new Set(players.map(p=>p.country).filter(Boolean));
+  if(countries.size<=1 && players.length>1){
+    players.forEach((p,i)=>{ state.colors[p.id]=PRESETS[i%PRESETS.length]; });
+  }
+}
+
+// #3 + #6 + #9: auto-generate an interpretive title + subtitle so the reader understands the
+// chart at a glance. Every type gets a subtitle that reads the DATA (who leads, who improved,
+// who's most complete), not just a restatement of the axis.
+function bestAt(players,me){ // returns the player who leads on this metric (direction-aware)
+  let best=null,bv=null;
+  players.forEach(p=>{ const v=val(p,me.key); if(typeof v!=='number') return; if(bv==null||(me.low?v<bv:v>bv)){bv=v;best=p;} });
+  return best;
+}
+function mostComplete(players,mets){ // highest average normalised score across all metrics
+  const fns=mets.map(me=>normFn(players,me.key));
+  let best=null,bv=-Infinity;
+  players.forEach(p=>{ const s=fns.reduce((a,f)=>a+f(p),0)/fns.length; if(s>bv){bv=s;best=p;} });
+  return best;
+}
+// A short human group label for a set — derived ENTIRELY from the actual players shown, never
+// from state.filters (which could be stale). Prefers the most specific accurate description:
+// single country + single role ("English pacers"), single shared role ("spinners"), single
+// country ("English bowlers"), else generic ("bowlers").
+const ROLE_PLURAL = { 'Pacer':'pacers','Spinner':'spinners','Top Order Bat':'top-order batters','Middle Order Bat':'middle-order batters','Finisher':'finishers','Wicket Keeper':'wicket-keepers','All-Rounder':'all-rounders' };
+function groupLabel(disc,players){
+  const roleWord = disc==='batting' ? 'batters' : 'bowlers';
+  const countries=[...new Set(players.map(p=>p.country).filter(Boolean))];
+  const roles=[...new Set(players.map(p=>p.role).filter(Boolean))];
+  // only claim a role if EVERY player shares it (and it isn't the catch-all All-Rounder)
+  let roleTerm=roleWord;
+  if(roles.length===1 && roles[0]!=='All-Rounder' && ROLE_PLURAL[roles[0]]) roleTerm=ROLE_PLURAL[roles[0]];
+  // only claim a country if EVERY player shares it
+  if(countries.length===1) return `${DEMONYMS[countries[0]]||countries[0]} ${roleTerm}`;
+  return roleTerm;
+}
+function randomTitleFor(arch,disc,mets,players,highlightPlayers){
+  const rangeWord = state.range==='wc' ? 'at the World Cup' : 'since the last World Cup';
+  const me=mets[0], info=mInfo(me);
+  const grp=groupLabel(disc,players);
+  const grpTitle=titleCase(grp);
+  const grpSingular = grpTitle
+    .replace(/Batters$/,'Batter').replace(/Bowlers$/,'Bowler').replace(/Pacers$/,'Pacer')
+    .replace(/Spinners$/,'Spinner').replace(/All-Rounders$/,'All-Rounder')
+    .replace(/Finishers$/,'Finisher').replace(/Wicket-Keepers$/,'Wicket-Keeper');
+
+  if(state.type==='scatter'){
+    const t=`${me.label} vs ${mets[1].label}`;
+    let s;
+    if(highlightPlayers&&highlightPlayers.length){
+      s = highlightPlayers.map(p=>scatterVerdict(p,players,mets)).join(' ');
+    } else { s=`${info.full} against ${mInfo(mets[1]).full} for every qualifying player ${rangeWord}.`; }
+    return {t,s};
+  }
+  if(state.type==='bar'){
+    const leader=bestAt(players,me);
+    const country=(players.length&&[...new Set(players.map(p=>p.country))].length===1)?players[0].country:null;
+    // role-only label (no country) — used when the header already names the country, so we
+    // never get "West Indies' Leading West Indian Batters".
+    const roles=[...new Set(players.map(p=>p.role).filter(Boolean))];
+    let roleOnly = disc==='batting' ? 'Batters' : 'Bowlers';
+    if(roles.length===1 && roles[0]!=='All-Rounder' && ROLE_PLURAL[roles[0]]) roleOnly=titleCase(ROLE_PLURAL[roles[0]]);
+    let t;
+    if(country){
+      const rankNoun = info.noun==='runs'?'Run-Scorers' : info.noun==='wickets'?'Wicket-Takers' : roleOnly;
+      t=`${possessive(country)} Leading ${rankNoun}`;
+    } else if(leader){
+      t=`${leader.name} Leads the Way`;
+    } else {
+      t=`The Best ${titleCase(grp)}`;
+    }
+    let s='';
+    if(leader){
+      const vals=players.map(p=>val(p,me.key)).filter(v=>typeof v==='number').sort((a,b)=>info.hi?b-a:a-b);
+      const gap = vals.length>1 ? Math.abs(vals[0]-vals[1])/Math.max(Math.abs(vals[0]),1e-9) : 0;
+      const lv=fmtVal(me,val(leader,me.key));
+      s = gap>=0.2
+        ? `${leader.name} has been in a class of her own on ${info.noun}, with ${lv}.`
+        : `${leader.name} ${info.verb} ${rangeWord}, with ${lv} — just ahead of the pack.`;
+    }
+    return {t,s};
+  }
+  if(state.type==='donut'){
+    const leader=bestAt(players,me);
+    const country = players.length ? players[0].country : null;
+    const poss = country ? possessive(country) : "the team's";
+    const total=players.reduce((sum,p)=>sum+(val(p,me.key)||0),0);
+    const t=`Where Do ${poss} ${titleCase(info.noun)} Come From?`;
+    let s;
+    if(leader && total>0){
+      const share=Math.round(val(leader,me.key)/total*100);
+      s = share>=30
+        ? `Nearly ${share}% of ${poss} ${info.noun} have come from ${leader.name} alone.`
+        : `${poss} ${info.noun} have been shared around — ${leader.name} leads with ${share}%.`;
+    } else { s=`How ${country||'the team'} splits its ${info.noun} ${rangeWord}.`; }
+    return {t,s};
+  }
+  if(state.type==='radar'){
+    if(!state.radarSep && players.length===2){
+      const [a,b]=players;
+      const complete=mostComplete(players,mets);
+      const other = complete && complete.id===a.id ? b : a;
+      let edgeMe=null;
+      mets.forEach(m=>{ const fn=normFn(players,m.key); if(fn(other)>fn(complete)) edgeMe=edgeMe||m; });
+      const t=`${a.name} vs ${b.name}`;
+      const s= edgeMe
+        ? `${complete.name} has the fuller game, but ${other.name} wins on ${mInfo(edgeMe).noun}.`
+        : `${complete.name} leads ${other.name} across ${mets.length} metrics ${rangeWord}.`;
+      return {t,s};
+    }
+    const complete=mostComplete(players,mets);
+    // find the metric where some player OTHER than the all-rounder leads by the widest margin
+    let standoutMe=null, standoutPlayer=null, bestGap=-1;
+    mets.forEach(m=>{ const f=normFn(players,m.key); const scored=players.map(p=>({p,v:f(p)})).sort((x,y)=>y.v-x.v);
+      const top = scored[0].p===complete ? scored[1] : scored[0];
+      if(top){ const gap=top.v - (scored.find(s=>s.p===complete)?f(complete):0); if(gap>bestGap){bestGap=gap;standoutMe=m;standoutPlayer=top.p;} } });
+    const t=`The Complete ${grpSingular}`;
+    let s;
+    if(complete && standoutPlayer && bestGap>4){
+      s=`${complete.name} does it all; ${standoutPlayer.name} is the ${mInfo(standoutMe).noun} specialist.`;
+    } else if(complete){
+      s=`${complete.name} has the most rounded profile across ${mets.length} metrics ${rangeWord}.`;
+    } else {
+      s=`${players.length} ${grp} compared across ${mets.length} metrics ${rangeWord}.`;
+    }
+    return {t,s};
+  }
+  if(state.type==='arrow'){
+    // Only describe players ACTUALLY drawn on the arrow — those with both a Since-WC and a WC
+    // value for this metric. A player who hasn't batted/bowled at the WC (missing or coerced-zero
+    // WC value) isn't plotted, so she must never be named as the "biggest mover". (matches
+    // arrowStats()/arrowHasBoth, the same filter the chart itself uses.)
+    const arrowPlayers = players.filter(p=>arrowHasBoth(p,me.key));
+    if(!arrowPlayers.length) return {t:`Change in ${me.label}`, s:`No selected player has both Since-WC and WC data for ${info.noun}.`};
+    let up=0,down=0, mover=null,md=0;
+    arrowPlayers.forEach(p=>{ const a=p.pre[me.key],b=p.wc[me.key]; const d=(me.low?a-b:b-a); if(d>0)up++; else if(d<0)down++; if(Math.abs(d)>Math.abs(md)){md=d;mover=p;} });
+    const mixed = up>0 && down>0 && Math.max(up,down) < (up+down)*0.7;
+    const t = mixed ? `Risers and Fallers: ${me.label}` : (md>=0 ? `Who's Found Another Gear?` : `Who's Fallen Away?`);
+    let s;
+    if(mover){
+      const pre=fmtVal(me,mover.pre[me.key]), wc=fmtVal(me,mover.wc[me.key]);
+      s=`${mover.name} has ${md>=0?'improved':'dropped'} the most — from ${pre} to ${wc} ${info.noun}.`;
+    } else { s=`How ${info.noun} shifted from before the World Cup to during it.`; }
+    return {t,s};
+  }
+  return {t:'', s:''};
+}
+// #4: scatter highlight verdict — reads each axis's better-direction and says whether the
+// player is good or bad on it, so an "outlier" is clearly a positive or negative standout.
+function scatterVerdict(p,players,mets){
+  const parts=mets.map(me=>{
+    const info=mInfo(me); const f=normFn(players,me.key); const v=f(p);
+    const others=players.filter(q=>q!==p).map(q=>f(q));
+    const avg=others.reduce((s,x)=>s+x,0)/(others.length||1);
+    // normFn already flips low-is-better metrics so higher normalised = better on every axis
+    return { good: v>avg+8, bad: v<avg-8, noun:info.noun };
+  });
+  const goods=parts.filter(x=>x.good).map(x=>x.noun);
+  const bads=parts.filter(x=>x.bad).map(x=>x.noun);
+  if(goods.length===mets.length) return `${p.name} has been exceptional — strong on ${listWords(goods)}.`;
+  if(goods.length && bads.length) return `${p.name} stands out for ${listWords(goods)}, but her ${listWords(bads)} lags the field.`;
+  if(goods.length) return `${p.name} stands out for ${listWords(goods)}.`;
+  if(bads.length) return `${p.name} sits off the pace on ${listWords(bads)}.`;
+  return `${p.name} sits at the extreme of the field.`;
+}
+function listWords(a){ return a.length<=1 ? (a[0]||'') : a.slice(0,-1).join(', ')+' and '+a[a.length-1]; }
+function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+function titleCase(s){ return s ? s.split(' ').map(w=>w.split('-').map(x=>x.charAt(0).toUpperCase()+x.slice(1)).join('-')).join(' ') : s; }
+
+// #9: pick 1-2 scatter outliers to highlight — the players furthest from the pack centre on
+// the two plotted metrics (normalised), so the highlight always lands on something notable.
+function scatterOutliers(players,mets){
+  if(players.length<2) return players.slice(0,1);
+  const fx=normFn(players,mets[0].key), fy=normFn(players,mets[1].key);
+  const pts=players.map(p=>({p,x:fx(p),y:fy(p)}));
+  const cx=pts.reduce((s,q)=>s+q.x,0)/pts.length, cy=pts.reduce((s,q)=>s+q.y,0)/pts.length;
+  pts.sort((a,b)=> ((b.x-cx)**2+(b.y-cy)**2) - ((a.x-cx)**2+(a.y-cy)**2));
+  return pts.slice(0, Math.random()<0.5?1:2).map(q=>q.p);
+}
+
+function surpriseMe(){
+  // 1. clean slate
+  state.highlight=[]; state.labelOffsets={}; state.manualIds=new Set();
+  state.filters={role:'',hand:'',country:''}; state.axisLabels={}; state.colors={};
+  state.quadOn=false; state.trend=false;
+
+  // fallback ladder: choose an archetype, try to build; if it fails or is too-similar to the
+  // last spin, re-roll. History/pity counters only commit once a spin actually succeeds.
+  let result=null, arch=null, disc=null, attempts=0;
+  const tried=new Set();
+  while(!result && attempts<20){
+    attempts++;
+    arch=chooseArchetype(tried);
+    tried.add(arch.id);
+    arch.apply(); // set state.type + variation NOW so validation below reads the correct type
+    disc = Math.random()<0.5 ? 'batting' : 'bowling';
+    state.discipline=disc;
+    state.filters={role:'',hand:'',country:''};
+    maybeApplyCategoricalFilter(arch.id,disc);
+    let r=arch.build(disc);
+    if(!r){ state.filters={role:'',hand:'',country:''}; r=arch.build(disc); } // loosen filter, retry once
+    if(r){
+      const forArrow = state.type==='arrow';
+      r.players = r.players.filter(p=>hasMetricData(p,r.mets,forArrow)); // #4 safety net
+      const minNeeded = state.type==='scatter'?20 : state.type==='radar'?(state.radarSep?4:2) : 6; // #4/#5 minimums (overlaid radar = 2)
+      if(r.players.length<minNeeded) r=null;
+    }
+    // #8 diversity: scatter reuses the whole qualifying pool, so enforce DIFFERENT metrics
+    // vs the last scatter instead of roster overlap. Discrete archetypes enforce BOTH <80%
+    // roster overlap AND a different metric+discipline signature than the previous spin, so
+    // two ranked charts never show the same leaders on the same stat back-to-back.
+    if(r){
+      if(state.type==='scatter'){
+        const mk=r.mets.map(m=>m.key).sort().join('|');
+        if(mk===lastScatterMetricKey && tried.size<ARCHETYPES.length) r=null;
+      } else {
+        const sig=disc+':'+r.mets.map(m=>m.key).sort().join('|');
+        const overlapBad=tooSimilarToLast(r.players.map(p=>p.id));
+        const sigRepeat=(sig===lastDiscreteSig);
+        if((overlapBad||sigRepeat) && tried.size<ARCHETYPES.length) r=null;
+      }
+    }
+    result=r;
+  }
+  if(!result){ // ultimate fallback: simple bar on real data with valid values only
+    arch=ARCHETYPES[1]; arch.apply(); state.discipline='batting';
+    state.filters={role:'',hand:'',country:''};
+    result=rankBuild('batting',Math.min(8,state.players.length));
+    if(!result){ const me=displayMetricsFor('batting')[0];
+      const pl=state.players.filter(p=>hasMetricData(p,[me],false)).slice(0,8);
+      result={mets:[me],players:pl}; }
+  }
+  commitRoll(arch); // spin succeeded — now advance pity counters exactly once
+
+  // the builder is authoritative on discipline (it may differ from the coin-flip if a fallback
+  // pool was used); trust result.disc so titles/footers describe the right thing.
+  disc = result.disc || disc;
+  state.discipline = disc;
+
+  // 2. commit metrics + player set
+  setMet(result.mets.map(m=>m.key));
+  const ids=sortByCountry(result.players.map(p=>p.id));
+  state.candidates=ids;
+  state.sel=ids.slice(); // reset sel to the validated set BEFORE reconcile, so no stale player
+                         // from the previous spin can survive when the new set is under the cap
+  reconcileSelForType(); // caps/sorts sel appropriately for the chosen type
+  lastPlayerIds=state.sel.slice(); // #8: remember for next spin's similarity check
+  if(state.type==='scatter') lastScatterMetricKey=result.mets.map(m=>m.key).sort().join('|');
+  else lastDiscreteSig=disc+':'+result.mets.map(m=>m.key).sort().join('|'); // #8: remember metric+discipline signature
+
+  // #7: colour variety for single-country sets
+  ensureColourVariety(plottedPlayers());
+
+  // #6: numbers on for bar/donut/pie
+  state.barNums = (state.type==='bar');
+  if(state.type==='donut'){ state.donutNums=true; state.donutPct=false; } else { state.donutNums=false; state.donutPct=false; }
+  // #3: randomised bar/donut/arrow default to a clean most-first ordering
+  state.chartSort = ['bar','donut','arrow'].includes(state.type) ? 'desc' : 'none';
+
+  // #9: scatter always highlights 1-2 outliers
+  let highlightPlayers=[];
+  if(state.type==='scatter'){
+    highlightPlayers=scatterOutliers(plottedPlayers(),result.mets);
+    state.highlight=highlightPlayers.map(p=>p.id);
+    window.__randomiserHighlights=true; // tell seedScatterHighlights to leave these deliberate outliers alone
+    highlightPlayers.forEach((p,i)=>{ if(!state.colors[p.id]) state.colors[p.id]=PRESETS[i%PRESETS.length]; });
+  }
+
+  // #1/#2/#3: derive filters from the ACTUAL players shown — this is the single source of truth.
+  // Whatever ends up in state.filters is guaranteed true of every plotted player, so the title,
+  // the footer, and the Advanced Filters panel can never contradict the data.
+  const plotted = plottedPlayers();
+  state.filters = deriveFilters(plotted);
+  window.__randomiserFiltersActive = true;
+
+  // Build the FULL editable recipe of real advanced-filter conditions that reproduces this exact
+  // set, so Compare Stats' Advanced Filters popup shows every rule (country, min innings, the
+  // metric cut) as editable conditions the user can tweak and re-run. This is the authoritative
+  // description of the chart's population.
+  state.__randomiserRecipe = buildRandomiserRecipe(result, plotted, disc);
+
+  // #3: honest footer describing the ACTUAL scope, using only derived (true) filters.
+  state.csSentenceParts=null; // don't let the embed sentence override
+  state.footMode='custom';
+  state.footCustom=autoDescribeFooter();
+
+  // #3: reflect the derived filters in the Advanced Filters UI (both standalone panel and embed).
+  if(typeof fillFilterSelects==='function' && document.getElementById('f-role')) fillFilterSelects();
+  renderActiveFilters();
+  if(window.__csEmbed){ try{ parent.postMessage({type:'cs-filters-set',filters:{...state.filters}},'*'); }catch(e){} }
+
+  // 3. refresh every dependent surface (mirrors the message-handler refresh sequence)
+  document.querySelectorAll('#disc button').forEach(x=>x.classList.toggle('on',x.dataset.v===state.discipline));
+  refreshSel(); buildMetricMenu(); updateMetLabel(); buildDetails(); render();
+
+  // #2: generate the title AFTER render — render() can auto-switch the chart type via the
+  // recommender if a metric/type combo is borderline, and the title must match the FINAL type
+  // shown, never the pre-switch one (which caused arrow titles to appear on donuts).
+  const meta=randomTitleFor(arch,state.discipline,result.mets,plottedPlayers(),highlightPlayers);
+  state.autoText=true; state.title=meta.t; state.sub=meta.s;
+  const setT=(el,txt)=>{ if(el && document.activeElement!==el) el.textContent=txt; };
+  setT(document.getElementById('cTitle'),meta.t);
+  const subEl=document.getElementById('cSub'); if(subEl){ setT(subEl,meta.s); subEl.style.display=meta.s?'block':'none'; }
+}
+let lastScatterMetricKey=''; // #8: remember last scatter's metric pair to force variety
+let lastDiscreteSig='';      // #8: remember last discrete chart's metric+discipline to force variety
 
 /* ---------- recommender + type list ---------- */
 function arrowBothCount(field){
@@ -973,7 +1740,17 @@ const numLabelPlugin={id:'numlabel',afterDatasetsDraw(c){
     ctx.save(); ctx.font=`700 10.5px ${BODY}`; ctx.textAlign='center'; ctx.textBaseline='middle';
     meta.data.forEach((el,i)=>{
       const v=vals[i]; if(typeof v!=='number'||!v) return;
-      const pos=el.tooltipPosition?el.tooltipPosition():{x:el.x,y:el.y};
+      // Position the label near the OUTER edge of the slice rather than the ring centroid.
+      // Use the slice's mid-angle and a radius close to the outer edge so numbers sit out
+      // near the rim where there's more room and they read against the slice colour.
+      const a=el.getProps?el.getProps(['startAngle','endAngle','innerRadius','outerRadius','x','y'],true):el;
+      const mid=(a.startAngle+a.endAngle)/2;
+      // Pie (no hole) -> labels near the rim; Donut (has hole) -> labels back in the ring
+      // centroid where they read cleanly inside the band. (#2)
+      const isPie = (a.innerRadius||0) < 1;
+      const frac = isPie ? 0.78 : 0.5;
+      const rr=a.innerRadius + (a.outerRadius-a.innerRadius)*frac;
+      const pos={x:a.x+Math.cos(mid)*rr, y:a.y+Math.sin(mid)*rr};
       const label=state.donutPct ? `${Math.round(total?v/total*100:0)}%` : fmtNum(v,me?me.dp:0);
       const tw=ctx.measureText(label).width, padX=6, padY=3, r=8;
       const bx0=pos.x-tw/2-padX, bx1=pos.x+tw/2+padX, by0=pos.y-padY-6, by1=pos.y+padY+6;
@@ -998,8 +1775,49 @@ function noChartMessage(rec){
   if(rec.pick) return null;
   return `No chart type fits ${n} metrics and ${np} players. Use 6 or fewer players for Radar, or narrow to 2 metrics for Scatter, or 1 metric for Bar.`;
 }
+// Build the descriptive footer ("Runs · Top 6 batters by runs. All data since last WC.") from the
+// CURRENT chart state, so it regenerates on metric/type/filter changes just like the title. Used
+// by both the randomiser and the live auto-description.
+function autoDescribeFooter(){
+  const mets=selM(); if(!mets.length) return '';
+  const me0=mets[0]; const info0=mInfo(me0); const disc=state.discipline;
+  const scopeWord = disc==='batting' ? 'batters' : 'bowlers';
+  const scopeWordSing = disc==='batting' ? 'batter' : 'bowler';
+  const rangeText = state.type==='arrow' ? 'Comparing WC to pre-WC data.' : 'All data since last WC.';
+  const trueCountry = state.filters.country;
+  const countryPrefix = trueCountry ? `${DEMONYMS[trueCountry]||trueCountry} ` : '';
+  let scope;
+  if(state.type==='scatter'){ scope=`Every qualifying ${countryPrefix}${scopeWordSing} (min ${inningsThreshold(state.range)} inns)`; }
+  else if(state.type==='donut'){ scope=`${countryPrefix}${scopeWord}, top ${state.sel.length} by ${info0.noun}`; }
+  else if(state.type==='radar'){ scope=`Selected ${countryPrefix}${scopeWord}`; }
+  else if(state.type==='arrow'){ const shown=plottedPlayers().filter(p=>arrowHasBoth(p,me0.key)).length; scope=`${shown} ${countryPrefix}${scopeWord} with the biggest change`; }
+  else { scope=`Top ${state.sel.length} ${countryPrefix}${scopeWord} by ${info0.noun}`; }
+  return `${info0.full} · ${scope}. ${rangeText}`;
+}
+// Regenerate the chart's title + subtitle from the CURRENT chart state (type/metric/players/
+// filters), using the same natural-language generator the randomiser uses. Runs on every render
+// while state.autoText is true, so any metric/type/filter change updates the description. Once
+// the user manually edits the title or subtitle, autoText flips off and we stop touching their
+// text. This is what keeps the description from getting "stuck" after a direct metric change.
+function regenAutoText(){
+  if(!state.autoText) return;
+  const mets=selM(); const players=plottedPlayers();
+  // only describe a genuinely renderable chart; otherwise leave placeholders in place
+  const need = state.type==='scatter'?2 : state.type==='radar'?3 : 1;
+  if(mets.length<need || players.length<1){ return; }
+  const hl = state.type==='scatter' ? players.filter(p=>state.highlight.includes(p.id)) : [];
+  let meta;
+  try { meta = randomTitleFor(null, state.discipline, mets, players, hl); }
+  catch(e){ return; }
+  if(meta && meta.t){ state.title=meta.t; state.sub=meta.s||''; }
+  // keep the footer description in sync too (#2) — but only while it's an auto footer, never
+  // overwrite a footer the user has switched to a custom/off mode deliberately elsewhere.
+  const fd=autoDescribeFooter();
+  if(fd){ state.footMode='custom'; state.footCustom=fd; }
+}
 function render(){
   const oldType=state.type;
+  applyChartSort(); // #3: order bar/donut/arrow by the metric when a sort is active
   const rec=recommend();
   const readyForAutoLogic = !window.__csEmbed || __csInitApplied; // in embed mode, don't auto-switch type or seed highlights off the initial demo data before the real Compare Stats selection has arrived
   let justSwitched=false;
@@ -1007,6 +1825,7 @@ function render(){
   if(readyForAutoLogic && state.type==='scatter') seedScatterHighlights(justSwitched || oldType!=='scatter'); // covers any path that lands on scatter (metric edits included), not just cs-init/cs-filtered; forces a proper reseed when freshly arriving so a stale leftover highlight can't masquerade as 'already seeded', but leaves a deliberate existing highlight alone while continuing to browse scatter
   paintTypes(rec);
   if(state.type!==oldType) buildDetails(); // keep the Details panel in sync with the active type
+  if(readyForAutoLogic) regenAutoText(); // refresh the auto description for the current chart (unless the user edited it), but not on pre-init demo data in embed mode
   const setT=(el,txt)=>{if(document.activeElement!==el)el.textContent=txt;};
   setT(document.getElementById('cTitle'),state.title);
   const subEl=document.getElementById('cSub');setT(subEl,state.sub);subEl.style.display=(state.sub||document.activeElement===subEl)?'block':'none';
@@ -1046,10 +1865,31 @@ function render(){
 function renderSeparate(){
   const players=plottedPlayers().slice(0,6),mets=selM(),host=document.getElementById('multi');host.innerHTML='';
   if(players.length<1||mets.length<3){host.style.display='flex';host.innerHTML='<div style="margin:auto;font-family:'+BODY+';font-style:italic;color:'+PP.sub+'">Pick 1–6 players and 3+ metrics for separate radars.</div>';return;}
-  const cols=Math.min(players.length,3);host.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+  host.style.display='grid';
+  // Use a 6-unit base grid and place each cell with an explicit column span + start. This lets
+  // short final rows sit CENTRED under the row above (no dangling empty slots):
+  //   4 -> 2+2 (each cell spans 3)   5 -> 3+2 (each spans 2, bottom row centred)   6 -> 3+3
+  //   1..3 -> single centred row.
+  const n=players.length;
+  host.style.gridTemplateColumns='repeat(6,1fr)';
+  // returns [span, startColumn(1-based)] for each cell index
+  function place(i){
+    if(n<=3){ const span=6/n; return [span, 1+i*span]; }
+    if(n===4){ // 2 rows of 2, each spans 3
+      const col=i%2; return [3, 1+col*3];
+    }
+    if(n===5){ // top row 3 (span 2 each), bottom row 2 (span 2, centred: cols 2-3 and 4-5)
+      if(i<3){ return [2, 1+i*2]; }
+      const k=i-3; return [2, 2+k*2];
+    }
+    // n===6: two rows of 3, each spans 2
+    const col=i%3; return [2, 1+col*2];
+  }
   const fns=mets.map(me=>({me,f:normFn(players,me.key)}));
   const hasHi=state.highlight.length>0;
   players.forEach((p,i)=>{const cell=document.createElement('div');cell.className='mini';cell.style.cursor='pointer';
+    const [span,start]=place(i);
+    cell.style.gridColumn=`${start} / span ${span}`;
     cell.style.opacity=hasHi&&!state.highlight.includes(p.id)?'0.3':'1';
     cell.onclick=()=>toggleHighlight(p.id);
     const lab=document.createElement('div');lab.className='mlab';lab.textContent=p.name;cell.appendChild(lab);
@@ -1121,7 +1961,7 @@ function refreshSel(){
 function buildMetricMenu(){const menu=document.getElementById('metMenu');const m=METRICS[state.discipline];
   const grp=(title,arr)=>`<div class="dd-grp">${title}</div>`+arr.map(me=>`<div class="dd-it ${curMet().includes(me.key)?'on':''}" data-key="${me.key}"><span class="bx"></span>${me.label}<span class="fam">${me.family}</span></div>`).join('');
   menu.innerHTML=grp('Attribute',m.attribute)+grp('Basic Stats',m.basic)+grp('Advanced Stats',m.advanced);
-  menu.querySelectorAll('[data-key]').forEach(it=>it.onclick=e=>{e.stopPropagation();const k=it.dataset.key;setMet(curMet().includes(k)?curMet().filter(x=>x!==k):curMet().concat(k));state.axisLabels={};if(state.type==='arrow'||state.type==='donut'){reconcileSelForType();refreshSel();}buildMetricMenu();updateMetLabel();buildDetails();render();csNotifyMetrics();});
+  menu.querySelectorAll('[data-key]').forEach(it=>it.onclick=e=>{e.stopPropagation();const k=it.dataset.key;setMet(curMet().includes(k)?curMet().filter(x=>x!==k):curMet().concat(k));state.axisLabels={};if(capFor(state.type)!==Infinity){reconcileSelForType();refreshSel();}buildMetricMenu();updateMetLabel();buildDetails();render();csNotifyMetrics();});
 }
 function csNotifyMetrics(){ if(window.__csEmbed){ try{ parent.postMessage({type:'cs-metrics',discipline:state.discipline,keys:curMet().slice()},'*'); }catch(e){} } }
 function updateMetLabel(){const labs=selM().map(m=>m.label);document.getElementById('metLabel').textContent=labs.length?labs.join(', '):'Choose metrics…';}
@@ -1148,6 +1988,19 @@ function buildDetails(){
       info.innerHTML=t+'.';
     } else { info.textContent='Choose a metric to compare.'; }
     vs.appendChild(info);
+  }
+  // #3: sort order for bar/donut/arrow — order the chart by the metric (most/least) or keep
+  // the current order.
+  if(['bar','donut','arrow'].includes(state.type)){
+    const lab=document.createElement('div'); lab.className='sec-h'; lab.style.marginTop='9px'; lab.innerHTML='<span>Sort order</span>'; vs.appendChild(lab);
+    const seg=document.createElement('div'); seg.className='seg full';
+    const opts=[['desc','Most first'],['asc','Least first'],['none','As selected']];
+    seg.innerHTML=opts.map(([v,l])=>`<button data-v="${v}" class="${(state.chartSort||'none')===v?'on':''}">${l}</button>`).join('');
+    seg.onclick=e=>{ const b=e.target.closest('button'); if(!b) return; state.chartSort=b.dataset.v; buildDetails(); render(); };
+    vs.appendChild(seg);
+    const hint=document.createElement('div'); hint.className='hint2'; hint.style.marginTop='4px';
+    hint.textContent = state.type==='arrow' ? 'Sorts by size of change.' : `Sorts by ${selM().map(m=>m.label).join(' + ')||'the selected metric'}.`;
+    vs.appendChild(hint);
   }
   // Best/worst-performer selection — only worth showing once there are more candidates
   // than this chart type can display (otherwise everyone's already shown).
@@ -1355,8 +2208,21 @@ function fillFilterSelects(){
   const fill=(el,vals,allLabel)=>{el.innerHTML=`<option value="">${allLabel}</option>`+vals.map(v=>`<option value="${v}">${v}</option>`).join('');};
   fill(role,uniq('role'),'All roles');fill(hand,['RHB','LHB'],'All hands');fill(country,uniq('country'),'All countries');
   role.value=state.filters.role;hand.value=state.filters.hand;country.value=state.filters.country;
+  renderActiveFilters();
+}
+// Always-visible readout of the active filters in the left bar, so the exact filter scope is
+// verifiable at a glance without opening any modal (works identically standalone and embedded).
+function renderActiveFilters(){
+  const el=document.getElementById('activeFilters'); if(!el) return;
+  const f=state.filters||{}; const parts=[];
+  if(f.country) parts.push(f.country);
+  if(f.role) parts.push(f.role);
+  if(f.hand) parts.push(f.hand==='RHB'?'Right-hand':f.hand==='LHB'?'Left-hand':f.hand);
+  if(parts.length){ el.style.display='block'; el.textContent='Filtered to: '+parts.join(' · '); }
+  else { el.style.display='none'; el.textContent=''; }
 }
 function applyFilters(){
+  window.__randomiserFiltersActive=false; // user is driving filters now
   state.filters.role=document.getElementById('f-role').value;
   state.filters.hand=document.getElementById('f-hand').value;
   state.filters.country=document.getElementById('f-country').value;
@@ -1365,6 +2231,7 @@ function applyFilters(){
   state.sel=applyCap(state.candidates, capFor(state.type));
   state.highlight=state.highlight.filter(id=>state.sel.includes(id));
   document.getElementById('filtersBack').classList.remove('on');
+  renderActiveFilters();
   refreshSel();buildDetails();render();
 }
 
@@ -1378,24 +2245,38 @@ function init(){
   document.getElementById('metMenu').onclick=e=>e.stopPropagation();
   document.getElementById('selMenu').onclick=e=>e.stopPropagation();
   document.addEventListener('click',()=>document.querySelectorAll('.dd-menu').forEach(x=>x.classList.remove('on')));
-  document.getElementById('ctitle').oninput=e=>{state.title=e.target.value;render();};
-  document.getElementById('csub').oninput=e=>{state.sub=e.target.value;render();};
+  document.getElementById('ctitle').oninput=e=>{state.autoText=false;state.title=e.target.value;render();};
+  document.getElementById('csub').oninput=e=>{state.autoText=false;state.sub=e.target.value;render();};
   document.getElementById('footMode').onclick=e=>{const b=e.target.closest('button');if(!b)return;document.querySelectorAll('#footMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');state.footMode=b.dataset.v;document.getElementById('footCustom').style.display=state.footMode==='custom'?'block':'none';render();};
   document.getElementById('footCustom').oninput=e=>{state.footCustom=e.target.value;render();};
-  document.getElementById('advBtn').onclick=()=>{ if(window.__csEmbed){ try{ parent.postMessage({type:'cs-openAdvanced',discipline:state.discipline,range:state.range},'*'); }catch(e){} } else { fillFilterSelects();document.getElementById('filtersBack').classList.add('on'); } };
+  document.getElementById('advBtn').onclick=()=>{
+    // When embedded in Compare Stats, ALWAYS open the parent's real Advanced Filters popup. A
+    // randomise produces a recipe; we send it ONCE (the first time the popup is opened after that
+    // randomise) so the popup shows the exact combination. On later opens we send no recipe, so
+    // whatever the user has since edited in the popup is preserved rather than reset. (#1)
+    if(window.__csEmbed){
+      const recipe = state.__randomiserRecipe; // null once consumed or when parent-driven
+      const payload = {type:'cs-openAdvanced',discipline:state.discipline,range:state.range};
+      if(recipe){ payload.filters=recipe.filters; payload.conds=recipe.conds; state.__randomiserRecipe=null; }
+      try{ parent.postMessage(payload,'*'); }catch(e){}
+    } else {
+      fillFilterSelects(); document.getElementById('filtersBack').classList.add('on');
+    }
+  };
   document.getElementById('fApply').onclick=applyFilters;
-  document.getElementById('fClear').onclick=()=>{state.filters={role:'',hand:'',country:''};fillFilterSelects();};
+  document.getElementById('fClear').onclick=()=>{state.filters={role:'',hand:'',country:''};fillFilterSelects();renderActiveFilters();};
   document.getElementById('filtersBack').onclick=e=>{if(e.target.id==='filtersBack')e.target.classList.remove('on');};
   document.getElementById('download').onclick=download;
+  document.getElementById('surpriseBtn').onclick=surpriseMe;
   document.getElementById('upbtn').onclick=()=>document.getElementById('filein').click();
   document.getElementById('filein').onchange=e=>{const f=e.target.files[0];if(!f)return;const fr=new FileReader();fr.onload=()=>{try{loadData(adapt(JSON.parse(fr.result)),'data.json');}catch(err){alert('Parse error: '+err.message);}};fr.readAsText(f);};
   document.getElementById('ctitle').value=state.title;document.getElementById('csub').value=state.sub;
   // click-to-edit directly on the card
   const cT=document.getElementById('cTitle'),cS=document.getElementById('cSub'),cF=document.getElementById('cFootL');
-  cT.addEventListener('input',()=>{state.title=cT.textContent;document.getElementById('ctitle').value=cT.textContent;});
-  cS.addEventListener('input',()=>{state.sub=cS.textContent;document.getElementById('csub').value=cS.textContent;});
+  cT.addEventListener('input',()=>{state.autoText=false;state.title=cT.textContent;document.getElementById('ctitle').value=cT.textContent;});
+  cS.addEventListener('input',()=>{state.autoText=false;state.sub=cS.textContent;document.getElementById('csub').value=cS.textContent;});
   cF.addEventListener('focus',()=>{if(state.footMode!=='custom'){state.footCustom=autoFooter();state.footMode='custom';document.querySelectorAll('#footMode button').forEach(x=>x.classList.toggle('on',x.dataset.v==='custom'));const fc=document.getElementById('footCustom');fc.style.display='block';fc.value=state.footCustom;cF.textContent=state.footCustom;}});
-  cF.addEventListener('input',()=>{state.footCustom=cF.textContent;document.getElementById('footCustom').value=cF.textContent;});
+  cF.addEventListener('input',()=>{state.autoText=false;state.footCustom=cF.textContent;document.getElementById('footCustom').value=cF.textContent;});
   [['cTitle','[Title]'],['cSub','[Subtitle]']].forEach(([id,ph])=>document.getElementById(id).addEventListener('focus',function(){if(this.textContent===ph){const r=document.createRange();r.selectNodeContents(this);const s=getSelection();s.removeAllRanges();s.addRange(r);}}));
   setupAxisEdit();
   buildSearch();
@@ -1495,7 +2376,13 @@ function download(){
   const flEl=document.getElementById('cFootL'); const wasPh=flEl.classList.contains('cf-ph'); const phText=flEl.textContent;
   if(wasPh){ flEl.textContent=''; }
   html2canvas(card,{scale:2,backgroundColor:null,logging:false}).then(cv=>{const a=document.getElementById('dllink');a.href=cv.toDataURL('image/png');a.download=(state.title||'chart').replace(/[^\w]+/g,'_')+'_Best_of_Cricket.png';a.click(); if(wasPh){flEl.textContent=phText;}});}
-function loadData(players,label){state.players=players;state.candidates=players.slice(0,5).map(p=>p.id);state.sel=state.candidates.slice();state.highlight=[];state.colors={};state.filters={role:'',hand:'',country:''};state.axisLabels={};
+function loadData(players,label){state.players=players;
+  // #1: when embedded in Compare Stats, start BLANK — no seeded players — so opening the graph
+  // before any dataset has been built shows the empty-state prompt rather than an arbitrary
+  // 5-player scatter. Standalone (dev) keeps a small demo set so the page isn't empty on its own.
+  const seed = window.__csEmbed ? [] : players.slice(0,5).map(p=>p.id);
+  state.candidates=seed; state.sel=seed.slice();
+  state.highlight=[];state.colors={};state.filters={role:'',hand:'',country:''};state.axisLabels={};
   state.metrics={batting:['batting_sr','batting_average'],bowling:['economy','wickets']};
   document.getElementById('datasrc').textContent=label+' · '+players.length+' players';
   refreshSel();buildMetricMenu();updateMetLabel();buildDetails();render();}
@@ -1509,6 +2396,7 @@ function csUsable(keys){ return (keys||[]).filter(k=>!!mByKey(k)); } // keep onl
 function csPickType(n){ return n>=3?'radar':(n===2?'scatter':'bar'); }
 function seedScatterHighlights(force){
   if(state.type!=='scatter') return;
+  if(window.__randomiserHighlights){ window.__randomiserHighlights=false; return; } // randomiser already set deliberate outlier highlights this render — don't overwrite them
   if(!force) return; // already had our one chance to auto-seed — from here on, highlights are fully manual (can be cleared to zero and stay there)
   state.highlight=[]; // landing on scatter fresh — discard any incidental leftover and guarantee a real pair
   const pool=state.sel.slice();
@@ -1563,6 +2451,8 @@ window.addEventListener('message',e=>{
   if(m.type==='cs-init') csApplyInit(m);
   else if(m.type==='cs-theme') applyTheme(m.theme);
   else if(m.type==='cs-filtered' && Array.isArray(m.playerIds)){
+    window.__randomiserFiltersActive=false; // parent-driven selection supersedes any randomise
+    state.__randomiserRecipe=null; // the recipe described the randomised set; it no longer applies
     if(typeof m.sentence==='string') state.csSentence=m.sentence;
     if(m.sentenceParts&&typeof m.sentenceParts==='object') state.csSentenceParts=m.sentenceParts;
     if((m.discipline==='batting'||m.discipline==='bowling') && m.discipline!==state.discipline){
@@ -1580,7 +2470,7 @@ window.addEventListener('message',e=>{
       const oneType=(k)=>{ const me=mByKey(k); return (me&&me.family==='total'&&state.candidates.length<=CAPS.donut) ? 'donut' : 'bar'; };
       const mets=advKeys.slice(0,3);
       setMet(mets); switchType(mets.length===1?oneType(mets[0]):csPickType(mets.length));
-      state.sel=applyCap(state.candidates, capFor(state.type)); // re-cap in case the type just changed
+      reconcileSelForType(); // #2: cap by best-on-metric, not alphabetical country order
     }
     seedScatterHighlights();
     refreshSel(); buildMetricMenu(); updateMetLabel(); buildDetails(); render();

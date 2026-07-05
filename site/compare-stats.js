@@ -917,6 +917,7 @@
   // open the one shared advanced popup.
   cs.graphReady = false;
   cs.graphOpen = false;
+  cs.graphInited = false; // has the graph received its one-time initial state? (reopens must not re-init)
   // Relay theme switches to the embedded graph iframe while it's open — wraps the
   // page's existing setTheme() (defined earlier in index.html) rather than duplicating
   // its logic; safe because compare-stats.js always loads after that inline script.
@@ -946,12 +947,22 @@
     const view = document.getElementById("cs-graphview");
     const frame = document.getElementById("cs-graphframe");
     if (!view || !frame) return;
-    if (!frame.getAttribute("src")) frame.setAttribute("src", "graph.html"); // lazy first load
+    // Cache-buster: the graph iframe is a separate document that browsers cache aggressively.
+    // A build-version query string forces the current graph.html to load, so the graph and this
+    // parent never drift out of sync (which previously made randomiser filters look "blank").
+    if (!frame.getAttribute("src")) frame.setAttribute("src", "graph.html?v=" + (window.CS_BUILD || Date.now())); // lazy first load
     cs.graphOpen = true;
     view.classList.add("show");
     const sub = document.getElementById("cs-graphsub");
     if (sub) sub.textContent = graphPlayerIds().length + " players from your filters";
-    if (cs.graphReady) sendGraphInit();   // otherwise the ready handshake sends it
+    // Only push a fresh init the FIRST time the graph opens. On later reopens the iframe still
+    // holds the user's built chart (type, metric, highlights, edits) in memory — re-sending init
+    // would wipe all of that back to the recommended default. Explicit filter changes still reach
+    // the graph via the Search button's cs-filtered message, so nothing is lost by not re-initing.
+    if (!cs.graphInited) {
+      if (cs.graphReady) { sendGraphInit(); cs.graphInited = true; }
+      // if not ready yet, the cs-graph-ready handler sends it and marks inited
+    }
   }
   function closeGraphView() {
     cs.graphOpen = false;
@@ -974,11 +985,34 @@
   // messages from the embedded graph
   window.addEventListener("message", (e) => {
     const m = e.data; if (!m || typeof m !== "object") return;
-    if (m.type === "cs-graph-ready") { cs.graphReady = true; if (cs.graphOpen) sendGraphInit(); }
+    if (m.type === "cs-graph-ready") { cs.graphReady = true; if (cs.graphOpen && !cs.graphInited) { sendGraphInit(); cs.graphInited = true; } }
     else if (m.type === "cs-openAdvanced") {
       if (m.discipline && m.discipline !== cs.discipline) switchDiscipline(m.discipline);
       const r = m.range === "wc" ? "wc" : "pre_wc";
       if (r !== cs.range) switchRange(r);
+      // A recipe (m.filters / m.conds) is sent only ONCE, right after a randomise. When present we
+      // install it as the editable Advanced Filters. When absent (a plain reopen), we leave cs.adv
+      // and cs.filters exactly as the user last edited them — reopening never resets their work.
+      const hasRecipe = (m.filters && typeof m.filters === "object") || (Array.isArray(m.conds) && m.conds.length);
+      if (hasRecipe) {
+        if (m.filters && typeof m.filters === "object") {
+          const gRole = m.filters.role || "";
+          const coarse = gRole ? (ROLE_GROUPS.Bowler.includes(gRole) ? "Bowler" : ROLE_GROUPS.Batter.includes(gRole) ? "Batter" : "") : "";
+          cs.filters = { role: coarse, type: "", hand: m.filters.hand || "", country: m.filters.country || "" };
+        }
+        if (Array.isArray(m.conds) && m.conds.length) {
+          const known = new Set(advFields().map((f) => f.key));
+          const conds = m.conds
+            .filter((c) => c && known.has(c.field))
+            .map((c) => ({ field: c.field, op: c.op || "gte", v1: c.v1 != null ? String(c.v1) : "", v2: c.v2 != null ? String(c.v2) : "" }));
+          cs.adv = conds.length ? { top: "AND", groups: [{ conn: "AND", conds }] } : freshAdv();
+        } else {
+          cs.adv = freshAdv();
+        }
+        cs.suppressGraphPush = true; // the graph already shows this exact set — don't echo it back and reset the chart
+        runFilters();
+        cs.suppressGraphPush = false;
+      }
       openAdvPopup();
     }
     else if (m.type === "cs-metrics") graphAddHighlights(m.discipline, m.keys);
@@ -1341,7 +1375,7 @@
     syncAppliedFilters();
     updateSearchPending();
     renderTable();
-    if (cs.graphOpen) { const w = graphFrameWin(); if (w) w.postMessage({ type: "cs-filtered", playerIds: graphPlayerIds(), discipline: cs.discipline, range: cs.range === "wc" ? "wc" : "pre", advMetricKeys: advMetricKeys(), sentence: filterSentence(graphPlayerIds().length, true), sentenceParts: sentenceParts() }, "*"); }
+    if (cs.graphOpen && !cs.suppressGraphPush) { const w = graphFrameWin(); if (w) w.postMessage({ type: "cs-filtered", playerIds: graphPlayerIds(), discipline: cs.discipline, range: cs.range === "wc" ? "wc" : "pre", advMetricKeys: advMetricKeys(), sentence: filterSentence(graphPlayerIds().length, true), sentenceParts: sentenceParts() }, "*"); }
     if (window.track) track("compare_stats_run_filters", {
       role: cs.filters.role || "all", type: cs.filters.type || "all",
       hand: cs.filters.hand || "all", country: cs.filters.country || "all",
